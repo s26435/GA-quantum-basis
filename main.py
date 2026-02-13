@@ -26,33 +26,8 @@ import csv
 
 import sqlite3
 
-
-from tqdm import tqdm  # noqa: F401
-
-BLOCKS = [14, 9, 4, 2]
-
-log_handle = Path("out.log")
-log_handle.touch(exist_ok=True)
-
-population_handle = Path("populations.csv")
-population_handle.touch(exist_ok=True)
-
-
-def lg(text: str, log_level: int = 1):
-    """
-    Logs *text* into stdout and into out.log file.
-
-    :param text: Text to log
-    :type text: str
-    :param log_level: Level of logging
-    :type log_level: int
-    """
-    msg = "[" + str(datetime.now()) + "] " + text
-    if log_level > 0:
-        print(msg)
-        with open(log_handle, "a") as file:
-            file.write(msg + "\n")
-
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning)
 
 @dataclass(frozen=True)
 class GA_cfg:
@@ -86,9 +61,44 @@ class GA_cfg:
     # cache
     db_path: str = "cache/energy.sqlite"
 
+    # model storage
+    model_from_file: bool = True
+    model_save_path: str = "model.ckpt"
+
+
+BLOCKS = [14, 9, 4, 2]
+
+log_handle = Path("out.log")
+log_handle.touch(exist_ok=True)
+
+population_handle = Path("populations.csv")
+population_handle.touch(exist_ok=True)
+
+
+def lg(text: str, log_level: int = 1):
+    """
+    Logs *text* into stdout and into out.log file.
+
+    :param text: Text to log
+    :type text: str
+    :param log_level: Level of logging
+    :type log_level: int
+    """
+    msg = "[" + str(datetime.now()) + "] " + text
+    if log_level > 0:
+        print(msg)
+        with open(log_handle, "a") as file:
+            file.write(msg + "\n")
+
 
 class CacheDatabase:
     def __init__(self, db_path: Union[str, Path]):
+        """
+        Constructor for database for caching energy for coressponding alpha.
+
+        :param db_path: path to .sqlite file
+        :type db_path: Union[str, Path]
+        """
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -118,6 +128,14 @@ class CacheDatabase:
             conn.close()
 
     def check(self, key: str) -> Optional[Tuple[float, int]]:
+        """
+        Check ing given key is in database
+
+        :param key: hashed key of genome
+        :type key: str
+        :return: energy, valid or None if there is no key in database
+        :rtype: Tuple[float, int] | None
+        """
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT energy, valid FROM energy_cache WHERE key=?;",
@@ -126,6 +144,16 @@ class CacheDatabase:
             return None if row is None else (float(row[0]), int(row[1]))
 
     def load(self, key: str, energy: float, valid: int):
+        """
+        Uploads genome to database
+
+        :param key: hashed genome
+        :type key: str
+        :param energy: value of energy
+        :type energy: float
+        :param valid: 1 if is valid 0 if not
+        :type valid: int
+        """
         try:
             e = float(energy)
         except Exception:
@@ -183,8 +211,19 @@ def random_variation_ordered(seq):
 
 def make_initial_population_from_seed(
     seed_alphas: List[float], pop_size: int, device: Union[str, torch.device] = "cpu"
-):
+) -> torch.Tensor:
+    """
+    Creates population of given size using given alphas as seed
 
+    :param seed_alphas: seed to generator
+    :type seed_alphas: List[float]
+    :param pop_size: size of population
+    :type pop_size: int
+    :param device: desired device of population
+    :type device: Union[str, torch.device]
+    :return: tensor of initial population
+    :rtype: torch.Tensor
+    """
     assert len(seed_alphas) == sum(BLOCKS), f"{len(seed_alphas)} is not {sum(BLOCKS)}"
 
     pop = []
@@ -208,6 +247,21 @@ def make_initial_population_from_seed(
 def sanitize_alphas(
     a: torch.Tensor, lo: float = 0, hi: float = 1e5, min_ratio: float = 1.2
 ) -> torch.Tensor:
+    """
+    Sorts and clamps given alphas 
+    
+    :param a: alphas tensor
+    :type a: torch.Tensor
+    :param lo: low boundary of clamp
+    :type lo: float
+    :param hi: high boundary of clamp
+    :type hi: float
+    :param min_ratio: minimum diffrence ratio between values
+    :type min_ratio: float
+    :return: tensor of sanitized alphas 
+    :rtype: torch.Tensor
+    """
+
     a = torch.clamp(a, lo, hi)
     a, _ = torch.sort(a, descending=True)
     for k in range(len(a) - 1):
@@ -218,8 +272,23 @@ def sanitize_alphas(
 
 
 def sanitize_blocks(
-    a: torch.Tensor, blocks=BLOCKS, lo=1e-2, hi=1e2, min_ratio=1.2
+    a: torch.Tensor, blocks=BLOCKS, lo: float=1e-2, hi: float=1e2, min_ratio: float=1.2
 ) -> torch.Tensor:
+    """
+    Sanitizes genome with respect to blocks.
+    
+    :param a: genome
+    :type a: torch.Tensor
+    :param blocks: list of lengths of blocks
+    :param lo: low boundary of clamp
+    :type lo: float
+    :param hi: high boundary of clamp
+    :type hi: float
+    :param min_ratio: minimum diffrence ratio between values
+    :type min_ratio: float
+    :return: Description
+    :rtype: Tensor
+    """
     parts = []
     off = 0
     for n in blocks:
@@ -235,13 +304,17 @@ def _run_energy_case(
     gen_dir_str: str,
     python_bin: str,
     engine_cmd: str,
+    case: str
 ) -> Tuple[int, float]:
+
+
     gen_dir = Path(gen_dir_str)
-    wd = gen_dir / f"case_{i:04d}"
+    wd = gen_dir / f"{case}_case_{i:04d}"
     wd.mkdir(parents=True, exist_ok=True)
 
     run_out = wd / "run.out"
     run_out.touch(exist_ok=True)
+    run_out.write_text("")
     energy_txt = wd / "energy.txt"
 
     try:
@@ -329,7 +402,17 @@ def _run_energy_case(
         return i, float("nan")
 
 
-def hash_alphas(alphas: torch.Tensor):
+def hash_alphas(alphas: torch.Tensor) -> str:
+    """
+    Hashing algorithm, that turns tensor of althas into key for caching database
+    
+    :param alphas: Description
+    :type alphas: torch.Tensor
+    :return:
+    :rtype:
+    """
+
+
     if isinstance(alphas, torch.Tensor):
         a = alphas.detach().cpu().numpy().astype(np.float64, copy=False)
     elif isinstance(alphas, np.ndarray):
@@ -342,6 +425,7 @@ def hash_alphas(alphas: torch.Tensor):
         decimals=7,
     )
     return hashlib.blake2b(a.tobytes(order="C"), digest_size=16).hexdigest()
+
 
 class PopGenerator(nn.Module):
     def __init__(self, population_size, genome_size, zdim, *args, **kwargs):
@@ -371,11 +455,10 @@ class PopGenerator(nn.Module):
 
         eps = torch.randn_like(std)
         x = mu + eps * std
-
-        log2pi = math.log(2.0 * math.pi)
-        logp_per_dim = -0.5 * (((x - mu) / std) ** 2 + 2.0 * log_std + log2pi)
+        x_det = x.detach()
+        logp_per_dim = -0.5 * (((x_det - mu) / std) ** 2 + 2.0*log_std + math.log(2.0 * math.pi))
         logp = logp_per_dim.sum(dim=1)
-
+        
         return x, logp, log_std
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
@@ -394,8 +477,8 @@ class GaussianPolicy(nn.Module):
         std = torch.exp(log_std)
         eps = torch.randn_like(std)
         x = self.mu + eps * std
-        log2pi = math.log(2.0 * math.pi)
-        logp_per_dim = -0.5 * (((x - self.mu) / std) ** 2 + 2.0 * log_std + log2pi)
+        x_det = x.detach()
+        logp_per_dim = -0.5 * (((x_det - self.mu) / std) ** 2 + 2.0*log_std + math.log(2.0 * math.pi))
         logp = logp_per_dim.sum(dim=1)
         return x, logp
 
@@ -404,16 +487,24 @@ class GA:
     def __init__(self, config: GA_cfg):
         self.cfg = config
         self.device = config.device
-        
+
         self.baseline = None
         self.baseline_beta = 0.9
 
         self.energy_cache = CacheDatabase(config.db_path)
         self.n_elite = max(1, int(self.cfg.elite_frac * self.cfg.population_size))
-        self.n_gen = max(0, min(int(self.cfg.population_size * self.cfg.gen_percent), self.cfg.population_size - self.n_elite))
+        self.n_gen = max(
+            0,
+            min(
+                int(self.cfg.population_size * self.cfg.gen_percent),
+                self.cfg.population_size - self.n_elite,
+            ),
+        )
 
         if self.n_gen <= 0:
-            raise ValueError(f"Number of generated genomes must be greater then 0 but is {self.n_gen}")
+            raise ValueError(
+                f"Number of generated genomes must be greater then 0 but is {self.n_gen}"
+            )
 
         self.n_offspring = max(0, self.cfg.population_size - self.n_elite - self.n_gen)
 
@@ -423,7 +514,33 @@ class GA:
             zdim=config.zdim,
         ).to(self.device)
 
-    def fitness(self, population: torch.Tensor) -> torch.Tensor:
+        self.policy = GaussianPolicy(self.n_gen, self.cfg.zdim).to(self.device)
+
+        self.opt = torch.optim.AdamW(
+            self.policy.parameters(), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay
+        )
+
+        self.opt_g = torch.optim.AdamW(
+            self.generator.parameters(),
+            lr=self.cfg.lr,
+            weight_decay=self.cfg.weight_decay,
+        )
+
+        if not Path(self.cfg.model_save_path).exists() and self.cfg.model_from_file:
+            raise FileNotFoundError(
+                f"Model checkpoint file not found: {self.cfg.model_save_path}"
+            )
+
+        if self.cfg.model_from_file:
+            ckpt = torch.load(self.cfg.model_save_path, map_location=self.cfg.device)
+
+            self.generator.load_state_dict(ckpt["generator"])
+            self.policy.load_state_dict(ckpt["policy"])
+
+            self.opt.load_state_dict(ckpt["opt"])
+            self.opt_g.load_state_dict(ckpt["opt_g"])
+
+    def fitness(self, population: torch.Tensor, case: str) -> torch.Tensor:
         B = population.size(0)
 
         gen_dir = Path(self.cfg.work_root) / f"gen_{self._gen_idx:04d}"
@@ -446,7 +563,11 @@ class GA:
             a = torch.exp(pop_cpu[i])
             a = sanitize_blocks(a, lo=1e-6, hi=1e5, min_ratio=1.2)
             alphas_all.append(a.tolist())
-            keys.append(hash_alphas(a,))
+            keys.append(
+                hash_alphas(
+                    a,
+                )
+            )
 
         energies: List[float | None] = [None] * B
         miss: List[tuple[int, List[float], str]] = []
@@ -476,6 +597,7 @@ class GA:
                         str(gen_dir),
                         python_bin,
                         engine_cmd,
+                        case,
                     )
                     for (i, alphas, _key) in miss
                 ]
@@ -536,15 +658,6 @@ class GA:
         )
 
         lg("Initializing policy model...", self.cfg.log_level)
-        policy = GaussianPolicy(self.n_gen, self.cfg.zdim).to(self.device)
-        opt = torch.optim.AdamW(
-            policy.parameters(), lr=self.cfg.lr, weight_decay=self.cfg.weight_decay
-        )
-        opt_g = torch.optim.AdamW(
-            self.generator.parameters(),
-            lr=self.cfg.lr,
-            weight_decay=self.cfg.weight_decay,
-        )
 
         best_genome = pop[0].clone()
         best_fit = float("inf")
@@ -553,14 +666,15 @@ class GA:
         handle = Path("metrics.csv")
         handle.touch(exist_ok=True)
         with open(handle, "a") as f:
-            f.write("generation,generator_loss,gen_non_penalty,ga_non_penalty_rate,best_fit,mean_fit,lr\n")
-
+            f.write(
+                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,lr\n"
+            )
 
         for gen in range(self.cfg.generations):
             lg(f"Starting Gen: {gen}", self.cfg.log_level)
 
             self._gen_idx = gen
-            fit = self.fitness(pop)
+            fit = self.fitness(pop, "pop")
             lg(
                 f"=======================\nFitness\n=======================\n{fit}\n=======================\n",
                 self.cfg.log_level,
@@ -580,8 +694,7 @@ class GA:
                 best_fit = float(minfit)
                 best_genome = pop[argmin].detach().clone()
 
-
-            elite_idx = torch.argsort(fit)[:self.n_elite]
+            elite_idx = torch.argsort(fit)[: self.n_elite]
 
             lg(f"Choosen elites: {elite_idx}", self.cfg.log_level)
 
@@ -605,7 +718,7 @@ class GA:
             next_base = torch.cat([elite, children], dim=0)
 
             lg("Sampling...", self.cfg.log_level)
-            z, logp_z = policy.sample()
+            z, logp_z = self.policy.sample()
             z = z.to(self.device)
             logp_z = logp_z.to(self.device)
 
@@ -614,7 +727,7 @@ class GA:
             lg(f"Generated {len(gen_part)}", self.cfg.log_level)
 
             lg("Caltulationg loss for generated population...", self.cfg.log_level)
-            gen_energy = self.fitness(gen_part)
+            gen_energy = self.fitness(gen_part, "gen")
 
             lg(
                 f"=======================\nGen E\n=======================\n{gen_energy}\n=======================\n",
@@ -641,23 +754,32 @@ class GA:
             loss = loss - 1e-3 * entropy_g
 
             lg(
-                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | {(gen_energy < (1e-4 * .999)).float().mean().item():.3} | {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) {best_fit:.6f} | lr {self.cfg.lr:.2e}\n",
+                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | {(gen_energy < (1e-4 * 0.999)).float().mean().item():.3} | {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) {best_fit:.6f} | lr {self.cfg.lr:.2e}\n",
                 self.cfg.log_level,
             )
 
             with open(handle, "a") as f:
                 f.write(
-                    f"{gen},{loss},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean()},{self.cfg.lr:.2e}\n"
+                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean()},{self.cfg.lr:.2e}\n"
                 )
 
-            opt.zero_grad()
-            opt_g.zero_grad()
+            self.opt.zero_grad()
+            self.opt_g.zero_grad()
             loss.backward()
-            opt.step()
-            opt_g.step()
+            self.opt.step()
+            self.opt_g.step()
 
             pop = torch.cat([next_base, gen_part], dim=0)
 
+        torch.save(
+            {
+                "generator": self.generator.state_dict(),
+                "opt_g": self.opt_g.state_dict(),
+                "opt": self.opt.state_dict(),
+                "policy": self.policy.state_dict(),
+            },
+            self.cfg.model_save_path,
+        )
         return best_genome, best_fit
 
 
@@ -665,7 +787,7 @@ if __name__ == "__main__":
     cfg = GA_cfg(
         population_size=30,
         genome_size=29,
-        generations=10,
+        generations=2,
         device="cpu",
     )
 
@@ -703,5 +825,5 @@ if __name__ == "__main__":
 
     ga = GA(cfg)
     best_genome, best_fit = ga.run(seed)
-    print("BEST_FIT:", best_fit)
-    print("BEST_ALPHA:", torch.exp(best_genome).tolist())
+    lg("BEST_FIT:" + str(best_fit), 1)
+    lg("BEST_ALPHA:" + str(torch.exp(best_genome).tolist()), 1)
