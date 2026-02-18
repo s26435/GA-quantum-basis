@@ -22,7 +22,7 @@
     * `mean_fit` - mean value of fitness function for whole population
     * `average_length` - average length of genomes in population
     * `best_energy` - value of <u>energy</u> of best genome
-    * `error` - error value of best genome: $\text{err} = |\text{ground\_truth} - E_{calculated}|$
+    * `error` - error value of best genome: $\text{err} = |E_{\text{ground truth}} - E_{\text{calculated}}|$
     * `lr` - learning rate of Population Generator
 
 2. `populations.csv` - contains exponents, masks, fitness function values and energy value of every genome in every population created during trianing
