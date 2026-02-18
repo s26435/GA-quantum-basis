@@ -47,7 +47,7 @@ class GA_cfg:
     genome_size: int = sum(BLOCKS)
 
     # mask weight multiplier
-    mask_lambda: float = 0.3
+    mask_lambda: float = 0.05
 
     # ga auto stops whrn error is lower
     error_threshold_early_stopping: float = 0.001
@@ -1047,8 +1047,9 @@ class GA:
             loss = loss - 1e-3 * entropy_g
 
             err = best_energy - self.cfg.ground_truth
+
             lg(
-                f"gen {gen:04d} | loss(gen) {float(loss):.6f} |  {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) {best_fit:.6f} | {pop_mask.sum(dim=1).mean().item():.3} | {best_energy} | {abs(err)} | lr {self.cfg.lr:.2e}\n",
+                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | lr {self.cfg.lr:.2e}\n",
                 self.cfg.log_level,
             )
 
@@ -1068,7 +1069,7 @@ class GA:
 
             if (self.cfg.ground_truth is not None) and (
                 abs(err)
-                <= self.cfg.error_threshold_early_stopping
+                <= self.cfg.error_threshold_early_stopping or self.cfg.ground_truth > best_energy
             ):
                 break
 

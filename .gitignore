@@ -1,0 +1,13 @@
+cache/
+gen_*/
+runs/
+*.ckpt
+*.log
+*.csv
+starting_point.txt
+*.k
+*.ca
+*.be
+estymator.py
+venv/
+analyze/

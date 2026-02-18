@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from pathlib import Path
-dir = "runs/run6/" 
+dir = "runs/run8/" 
 dir_anal = dir + "analyze/"
 Path(dir_anal).mkdir(exist_ok=True)
 
@@ -25,13 +25,13 @@ fig, axs = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
 
 fig.suptitle("GA genomes metrics summary")
 
-axs[0, 0].plot(df["generation"] + 1, df["best_fit"], color="cyan", label="Best fit")
+axs[0, 0].plot(df["generation"] + 1, df["best_energy"], color="cyan", label="Best fit")
 axs[0, 0].axhline(y=ground_truth, color="r", linestyle="--", label=fr"Ground Truth $\approx$ {ground_truth}")
 axs[0, 0].set_title("Best genome fit value of each generation")
 axs[0, 0].set_ylabel("units")
 axs[0, 0].legend()
 
-axs[0, 1].plot(df["generation"]+1, np.abs(np.array(ground_truth - df["best_fit"])), label=r"$err = | y_{true} - y_{pred} |$", color="orange")
+axs[0, 1].plot(df["generation"]+1, np.abs(np.array(ground_truth - df["best_energy"])), label=r"$err = | y_{true} - y_{pred} |$", color="orange")
 axs[0, 1].set_title("Best genome error from ground truth")
 axs[0, 1].set_xlabel("Generations")
 axs[0, 1].set_ylabel("units")
@@ -60,9 +60,8 @@ plt.title("Mean of fit of genomes in each generation")
 plt.axhline(y=ground_truth, color='r', linestyle='-', label="Ground Truth")
 plt.xlabel("Generations")
 plt.ylabel("units")
-plt.yscale("log")
 plt.tight_layout()
 plt.savefig(dir_anal + "mean_fits.png")
 plt.clf()
 
-print(df["best_fit"].max() - ground_truth)
+print(df["best_energy"].min() - ground_truth)
