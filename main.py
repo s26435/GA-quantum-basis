@@ -31,25 +31,42 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
+BLOCKS = [14, 9, 4, 2] # Be
+# BLOCKS = [20, 16, 6, 4]  # Ca
+
+
 @dataclass(frozen=True)
 class GA_cfg:
+    # true value of energy - used in early stopping, may be None
+    ground_truth: Optional[float] = -14.644
+
     # GA
-    population_size: int = 20
+    population_size: int = 30
     device: str = "cpu"
     generations: int = 1000
-    genome_size: int = 29
+    genome_size: int = sum(BLOCKS)
+
+    # mask weight multiplier
+    mask_lambda: float = 0.3
+
+    # ga auto stops whrn error is lower
+    error_threshold_early_stopping: float = 0.001
 
     # GA functions
     elite_frac: float = 0.2
     tournament_k: int = 2
     crossover_p: float = 0.9
+    # exponent mutation probability
     mutation_p: float = 0.4
-    mask_flip_p: float = 0.05
+    # strenght of mutation
     mutation_sigma: float = 0.2
+    # mask mutation probability
+    mask_flip_p: float = 0.05
 
     # generator parameters
-    mask_lambda: float = 0.5
+    # latent space size
     zdim: int = 16
+    # % generated genomes in population
     gen_percent: float = 0.5
 
     # generator training
@@ -64,15 +81,13 @@ class GA_cfg:
     # logging
     log_level: int = 1
 
-    # cache
-    db_path: str = "cache/energy.sqlite"
+    # cache storage
+    db_path: str = "cache/energy.sqlite" # ca = "cache/energy_ca.sqlite"
 
     # model storage
-    model_from_file: bool = False
-    model_save_path: str = "model.ckpt"
+    model_from_file: bool = True
+    model_save_path: str = "model_be.ckpt" #  ca = "model_ca.ckpt"
 
-
-BLOCKS = [14, 9, 4, 2]
 
 log_handle = Path("out.log")
 log_handle.touch(exist_ok=True)
@@ -218,6 +233,18 @@ def random_variation_ordered(seq):
 def make_initial_population_from_seed(
     seed_alphas: List[float], pop_size: int, device: Union[str, torch.device] = "cpu"
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Creates initial population for GA
+
+    :param seed_alphas: Seed
+    :type seed_alphas: List[float]
+    :param pop_size: size of given and returned population
+    :type pop_size: int
+    :param device: device of target tensors
+    :type device: Union[str, torch.device]
+    :return: tuple of exponents and masks
+    :rtype: Tuple[Tensor, Tensor]
+    """
     assert len(seed_alphas) == sum(BLOCKS), f"{len(seed_alphas)} is not {sum(BLOCKS)}"
 
     pop = []
@@ -244,10 +271,25 @@ def sanitize_block_with_mask(
     lo: float,
     hi: float,
     min_ratio: float,
-    mask_thresh: float = 0.5,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Makes sure that genome is valid and not extends given range
 
-    m = m_block > mask_thresh
+    :param a_block: genome tensor
+    :type a_block: torch.Tensor
+    :param m_block: mask tensor
+    :type m_block: torch.Tensor
+    :param lo: low value of clamp
+    :type lo: float
+    :param hi: high value of clamp
+    :type hi: float
+    :param min_ratio: maximum diffrence between exponents
+    :type min_ratio: float
+    :return: tuple of sanitized genome and mask
+    :rtype: Tuple[Tensor, Tensor]
+    """
+
+    m = m_block > 0.5
 
     out_a = torch.zeros_like(a_block)
     out_m = torch.zeros_like(m_block, dtype=torch.float32)
@@ -280,8 +322,24 @@ def sanitize_blocks(
     lo: float = 1e-2,
     hi: float = 1e2,
     min_ratio: float = 1.2,
-    mask_thresh: float = 0.5,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Sanitizes blocks - aranges exponents in order
+
+    :param a: Description
+    :type a: torch.Tensor
+    :param mask: Description
+    :type mask: torch.Tensor
+    :param blocks: Description
+    :param lo: low value of clamp
+    :type lo: float
+    :param hi: high value of clamp
+    :type hi: float
+    :param min_ratio: maximum diffrence between exponents
+    :type min_ratio: float
+    :return: tuple of sanitized genome and mask
+    :rtype: Tuple[Tensor, Tensor]
+    """
 
     assert a.numel() == mask.numel(), (
         f"a and mask must have same length: {a.numel()} vs {mask.numel()}"
@@ -294,12 +352,7 @@ def sanitize_blocks(
         a_block = a[off : off + n]
         m_block = mask[off : off + n]
         sa, sm = sanitize_block_with_mask(
-            a_block,
-            m_block,
-            lo=lo,
-            hi=hi,
-            min_ratio=min_ratio,
-            mask_thresh=mask_thresh,
+            a_block, m_block, lo=lo, hi=hi, min_ratio=min_ratio
         )
         parts_a.append(sa)
         parts_m.append(sm)
@@ -317,6 +370,26 @@ def _run_energy_case(
     engine_cmd: str,
     case: str,
 ) -> Tuple[int, float]:
+    """
+    Runs one job of calculation energy, energy could be nan
+
+    :param i: id of a job
+    :type i: int
+    :param alphas: genome
+    :type alphas: List[float]
+    :param mask: mask
+    :type mask: List[bool]
+    :param gen_dir_str: location of output directory
+    :type gen_dir_str: str
+    :param python_bin: python binary location
+    :type python_bin: str
+    :param engine_cmd: molcas binary location / command
+    :type engine_cmd: str
+    :param case: name of prefix for folder name of case - "gen"/"pop"
+    :type case: str
+    :return: tuple of id of job and calculated energy
+    :rtype: Tuple[int, float]
+    """
     gen_dir = Path(gen_dir_str)
     wd = gen_dir / f"{case}_case_{i:04d}"
     wd.mkdir(parents=True, exist_ok=True)
@@ -406,12 +479,14 @@ def _run_energy_case(
 
 def hash_alphas(alphas: torch.Tensor, mask: torch.Tensor) -> str:
     """
-    Hashing algorithm, that turns tensor of althas into key for caching database
+    Hashing algorithm, that turns tensor of exponents into key for caching database
 
-    :param alphas: Description
+    :param alphas: tensor of exponents
     :type alphas: torch.Tensor
-    :return:
-    :rtype:
+    :param mask: mask
+    :type mask: torch.Tensor
+    :return: hashed alphas
+    :rtype: str
     """
 
     if isinstance(alphas, torch.Tensor):
@@ -442,7 +517,19 @@ def hash_alphas(alphas: torch.Tensor, mask: torch.Tensor) -> str:
 
 
 class PopGenerator(nn.Module):
-    def __init__(self, population_size, genome_size, zdim, *args, **kwargs):
+    def __init__(
+        self, population_size: int, genome_size: int, zdim: int, *args, **kwargs
+    ):
+        """
+        Constructor for popultion generator. population_size, genome_size and zdim have to match with rest of the code
+
+        :param population_size: size of populaion
+        :type population_size: int
+        :param genome_size: size of one genome
+        :typr genome_size: int
+        :param zdim: size of latent space
+        :type zdim: int
+        """
         super(PopGenerator, self).__init__(*args, **kwargs)
 
         self.zdim = zdim
@@ -472,6 +559,14 @@ class PopGenerator(nn.Module):
     def sample(
         self, z: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Samples given latent space z
+
+        :param z: latent tensor
+        :type z: torch.Tensor
+        :return: tuple of generated exponents, log of probability of generated exponents, generated mask logits, and log of probability of generated mask logits
+        :rtype: Tuple[Tensor, Tensor, Tensor, Tensor]
+        """
         out = self.net(z)
         mu, log_std = out.chunk(2, dim=1)
         log_std = log_std.clamp(-5.0, 2.0)
@@ -496,18 +591,40 @@ class PopGenerator(nn.Module):
         logp = logp + logp_m
         return x, logp, log_std, m_st
 
-    def forward(self, z: torch.Tensor) -> torch.Tensor:
-        x, _, _, _ = self.sample(z)
-        return x
+    def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Wrapper for sample - used only for use when you don't want to train the net
+
+        :param z: latent tensor
+        :type z: torch.Tensor
+        :return: tuple of exponends and mask
+        :rtype: Tuple[Tensor, Tensor]
+        """
+        x, _, _, m = self.sample(z)
+        return x, m
 
 
 class GaussianPolicy(nn.Module):
-    def __init__(self, pop_size, zdim):
+    def __init__(self, pop_size: int, zdim: int):
+        """
+        Constructor for latent space. population_size and zdim have to match with rest of the code
+
+        :param pop_size: size of populations
+        :type pop_size: int
+        :param zdim: size of latent space
+        :type zdim: int
+        """
         super().__init__()
         self.mu = nn.Parameter(torch.zeros(pop_size, zdim))
         self.log_std = nn.Parameter(torch.zeros(pop_size, zdim))
 
-    def sample(self):
+    def sample(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Samples latent space
+
+        :return: tuple of latent and log probability of latent
+        :rtype: Tuple[Tensor, Tensor]
+        """
         log_std = self.log_std.clamp(-5.0, 2.0)
         std = torch.exp(log_std)
         eps = torch.randn_like(std)
@@ -522,6 +639,13 @@ class GaussianPolicy(nn.Module):
 
 class GA:
     def __init__(self, config: GA_cfg):
+        """
+        Constructor for genetic algorithm object
+
+        :param config: configuration object
+        :type config: GA_cfg
+        """
+
         self.cfg = config
         self.device = config.device
 
@@ -580,6 +704,18 @@ class GA:
     def fitness(
         self, population: torch.Tensor, pop_mask: torch.Tensor, case: str
     ) -> torch.Tensor:
+        """
+        Fitness function for population
+
+        :param population: tensor of population
+        :type population: torch.Tensor
+        :param pop_mask: tensor of masks of population
+        :type pop_mask: torch.Tensor
+        :param case:name of prefix for folder name of case - "gen"/"pop"
+        :type case: str
+        :return: tensor of values of energy
+        :rtype: Tensor
+        """
         B = population.size(0)
 
         gen_dir = Path(self.cfg.work_root) / f"gen_{self._gen_idx:04d}"
@@ -664,6 +800,16 @@ class GA:
         return torch.tensor(out, dtype=torch.float32, device=population.device)
 
     def _tournament_select(self, fit: torch.Tensor, n_select: int) -> torch.Tensor:
+        """
+        Docstring for _tournament_select
+
+        :param fit: tensor of energy values
+        :type fit: torch.Tensor
+        :param n_select: num of choosen genomes
+        :type n_select: int
+        :return: tensor of choosen genomes
+        :rtype: Tensor
+        """
         B = fit.size(0)
         k = self.cfg.tournament_k
         idx = torch.randint(0, B, (n_select, k), device=fit.device)
@@ -676,6 +822,20 @@ class GA:
     def _uniform_crossover(
         self, p1: torch.Tensor, m1: torch.Tensor, p2: torch.Tensor, m2: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Docstring for _uniform_crossover
+
+        :param p1: first parent
+        :type p1: torch.Tensor
+        :param m1: first parent's mask
+        :type m1: torch.Tensor
+        :param p2: second parent
+        :type p2: torch.Tensor
+        :param m2: second parent's mask
+        :type m2: torch.Tensor
+        :return: created child with mask
+        :rtype: Tuple[Tensor, Tensor]
+        """
         if torch.rand(()) > self.cfg.crossover_p:
             return p1.clone(), m1.clone()
 
@@ -687,6 +847,16 @@ class GA:
     def _ensure_block_nonempty(
         self, a_row: torch.Tensor, m_row: torch.Tensor
     ) -> torch.Tensor:
+        """
+        Ensures that every block in exponent tensor have at least one exponent
+
+        :param a_row: genome
+        :type a_row: torch.Tensor
+        :param m_row: mask
+        :type m_row: torch.Tensor
+        :return: corrected mask tensor
+        :rtype: Tensor
+        """
         off = 0
         m = m_row.clone()
         for n in BLOCKS:
@@ -701,6 +871,16 @@ class GA:
     def _mutate(
         self, x: torch.Tensor, m: torch.Tensor
     ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Mutation function. Mutates given genome (with cfg.mutation_p prob) and mask (with mask_flip_p prob for each element in mask)
+
+        :param x: tensor of exponents
+        :type x: torch.Tensor
+        :param m: mask tensor
+        :type m: torch.Tensor
+        :return: tuple fo mutated genome and mask
+        :rtype: Tuple[Tensor, Tensor]
+        """
         B, _ = x.shape
         if self.cfg.mutation_p > 0:
             do_mut = (torch.rand(B, 1, device=x.device) < self.cfg.mutation_p).float()
@@ -718,6 +898,12 @@ class GA:
         return x, m
 
     def run(self, seed_alphas: List[float]):
+        """
+        Runs the genetic algorithm
+
+        :param seed_alphas: Template for initial population
+        :type seed_alphas: List[float]
+        """
 
         lg("Initializing population...", self.cfg.log_level)
         pop, pop_mask = make_initial_population_from_seed(
@@ -728,7 +914,7 @@ class GA:
 
         best_genome = pop[0].clone()
         best_mask = pop_mask[0].clone()
-
+        best_energy = float("inf")
         best_fit = float("inf")
 
         lg("Starting GA...", self.cfg.log_level)
@@ -736,7 +922,7 @@ class GA:
         handle.touch(exist_ok=True)
         with open(handle, "a") as f:
             f.write(
-                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,lr\n"
+                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_energy,error,lr\n"
             )
 
         for gen in range(self.cfg.generations):
@@ -760,14 +946,24 @@ class GA:
                     fit.detach().cpu().tolist(),
                     fit_wmask.detach().cpu().tolist(),
                 ):
-                    w.writerow([torch.exp(torch.tensor(p, dtype=torch.float64)).tolist(), msk, f, fwm])
+                    w.writerow(
+                        [
+                            torch.exp(torch.tensor(p, dtype=torch.float64)).tolist(),
+                            msk,
+                            f,
+                            fwm,
+                        ]
+                    )
 
             minfit, argmin = torch.min(fit_wmask, dim=0)
 
             lg(f"Minfit: {minfit}, Argmin: {argmin}", self.cfg.log_level)
 
-            if float(minfit) < best_fit:
+            min_energy = float(fit[argmin])
+
+            if minfit < best_fit:
                 best_fit = float(minfit)
+                best_energy = min_energy
                 best_genome = pop[argmin].detach().clone()
                 best_mask = pop_mask[argmin].detach().clone()
 
@@ -814,10 +1010,10 @@ class GA:
             lg("Generating population using generation model...", self.cfg.log_level)
             gen_part, logp_g, g_log_std, mask = self.generator.sample(z.detach())
             mask = (mask > 0.5).float()
-            for i in range(mask.size(0)):
-                mask[i] = self._ensure_block_nonempty(
-                    torch.exp(gen_part[i].detach()), mask[i]
-                )
+            # for i in range(mask.size(0)):
+            #     mask[i] = self._ensure_block_nonempty(
+            #         torch.exp(gen_part[i].detach()), mask[i]
+            #     )
             lg(f"Generated {len(gen_part)}", self.cfg.log_level)
             lg(f"Generated {len(mask)}", self.cfg.log_level)
             lg("Caltulationg loss for generated population...", self.cfg.log_level)
@@ -828,8 +1024,11 @@ class GA:
                 self.cfg.log_level,
             )
 
-            reward = -gen_energy - self.cfg.mask_lambda * mask.sum(dim=1)
+            reward = -gen_energy - self.cfg.mask_lambda * (
+                mask.sum(dim=1) / self.cfg.genome_size
+            )
             r_mean = reward.mean()
+
             if self.baseline is None:
                 self.baseline = r_mean
             else:
@@ -847,14 +1046,15 @@ class GA:
             )
             loss = loss - 1e-3 * entropy_g
 
+            err = best_energy - self.cfg.ground_truth
             lg(
-                f"gen {gen:04d} | loss(gen) {float(loss):.6f} |  {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) {best_fit:.6f} | {pop_mask.sum(dim=1).mean().item():.3} | lr {self.cfg.lr:.2e}\n",
+                f"gen {gen:04d} | loss(gen) {float(loss):.6f} |  {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) {best_fit:.6f} | {pop_mask.sum(dim=1).mean().item():.3} | {best_energy} | {abs(err)} | lr {self.cfg.lr:.2e}\n",
                 self.cfg.log_level,
             )
 
             with open(handle, "a") as f:
                 f.write(
-                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{self.cfg.lr:.2e}\n"
+                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_energy},{abs(err)},{self.cfg.lr:.2e}\n"
                 )
 
             self.opt.zero_grad()
@@ -866,6 +1066,12 @@ class GA:
             pop = torch.cat([next_base, gen_part], dim=0)
             pop_mask = torch.cat([next_base_mask, mask], dim=0)
 
+            if (self.cfg.ground_truth is not None) and (
+                abs(err)
+                <= self.cfg.error_threshold_early_stopping
+            ):
+                break
+
         torch.save(
             {
                 "generator": self.generator.state_dict(),
@@ -875,16 +1081,11 @@ class GA:
             },
             self.cfg.model_save_path,
         )
-        return best_genome, best_mask, best_fit
+        return best_genome, best_mask, best_fit, best_energy
 
 
 if __name__ == "__main__":
-    cfg = GA_cfg(
-        population_size=30,
-        genome_size=29,
-        generations=10,
-        device="cpu",
-    )
+    cfg = GA_cfg()
 
     seed = [
         22628.599,
@@ -918,12 +1119,58 @@ if __name__ == "__main__":
         0.17150000,
     ]
 
+    # seed = [
+    #     6809719.36,
+    #     829347.437,
+    #     162290.662,
+    #     41026.8198,
+    #     12263.7623,
+    #     4131.35161,
+    #     1523.09560,
+    #     602.564047,
+    #     252.124225,
+    #     110.346869,
+    #     49.9958150,
+    #     22.9719819,
+    #     9.95680985,
+    #     4.57299757,
+    #     2.05419310,
+    #     0.88535650,
+    #     0.37372268,
+    #     0.06601407,
+    #     0.02635672,
+    #     0.01054268,
+    #     21599.8143,
+    #     3884.20155,
+    #     1096.96697,
+    #     385.187516,
+    #     153.934262,
+    #     66.9982541,
+    #     30.9708648,
+    #     14.8465963,
+    #     7.28779623,
+    #     3.62364204,
+    #     1.73391125,
+    #     0.81737794,
+    #     0.37811791,
+    #     0.15762725,
+    #     0.06305090,
+    #     0.02522036,
+    #     2.798365,
+    #     1.097115,
+    #     0.430130,
+    #     0.168635,
+    #     0.0661143,
+    #     0.02644572,
+    #     3.731153,
+    #     1.462819,
+    #     0.224846,
+    #     0.0881523,
+    # ]
+
     ga = GA(cfg)
-    (
-        best_genome,
-        best_mask,
-        best_fit,
-    ) = ga.run(seed)
+    best_genome, best_mask, best_fit, best_energy = ga.run(seed)
     lg("BEST_FIT:" + str(best_fit), 1)
+    lg("BEST_energy:" + str(best_energy), 1)
     lg("BEST_ALPHA:" + str(torch.exp(best_genome).tolist()), 1)
     lg("MASK: " + str(best_mask.tolist()), 1)
