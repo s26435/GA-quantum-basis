@@ -936,7 +936,7 @@ class GA:
         handle.touch(exist_ok=True)
         with open(handle, "a") as f:
             f.write(
-                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_energy,error,lr\n"
+                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_energy,error,current_lambda\n"
             )
 
         for gen in range(self.cfg.generations):
@@ -1069,13 +1069,13 @@ class GA:
             curr_lambda = self.lambda_from_error(self.err_ema)
 
             lg(
-                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | lr {self.cfg.lr:.2e}\n",
+                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | current lambda {curr_lambda:.2e}\n",
                 self.cfg.log_level,
             )
 
             with open(handle, "a") as f:
                 f.write(
-                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_energy},{abs(err)},{self.cfg.lr:.2e}\n"
+                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_energy},{abs(err)},{curr_lambda:.2e}\n"
                 )
 
             self.opt.zero_grad()
