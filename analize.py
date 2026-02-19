@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from pathlib import Path
-dir = "runs/run10/" 
+dir = ""# "runs/run11/" 
 dir_anal = dir + "analyze/"
 Path(dir_anal).mkdir(exist_ok=True)
 
@@ -37,8 +37,8 @@ axs[0, 1].set_xlabel("Generations")
 axs[0, 1].set_ylabel("units")
 axs[0, 1].legend()
 
-axs[1, 0].plot(df["generation"] + 1, df["average_length"], color="blue", label="Average length")
-axs[1, 0].set_title("Average length of alpha array")
+axs[1, 0].plot(df["generation"] + 1, df["best_len"], color="blue", label="Average length")
+axs[1, 0].set_title("Length of best genome of population")
 axs[1, 0].set_xlabel("Generations")
 axs[1, 0].set_ylabel("count")
 axs[1, 0].legend()
@@ -62,6 +62,13 @@ plt.xlabel("Generations")
 plt.ylabel("units")
 plt.tight_layout()
 plt.savefig(dir_anal + "mean_fits.png")
+plt.clf()
+
+plt.plot(df["generation"]+1, df["current_lambda"], color="blue")
+plt.title("Current mask lambda multiplayer")
+plt.xlabel("Generations")
+plt.tight_layout()
+plt.savefig(dir_anal + "curr_lambda.png")
 plt.clf()
 
 print(df["best_energy"].min() - ground_truth)

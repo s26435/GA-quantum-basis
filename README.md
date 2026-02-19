@@ -35,8 +35,8 @@
 1. Once in a while you need to clean /tmp/ becouse molcas doesn't clean its temp files (140GB /tmp/ incident)
 
 
-## TODO 
-* add to metrics.csv length of best genome
+## TODO
 * saving and loading GA_config preset
 * add option to not train population Generator during GA
 * mutation change may be better for low error training
+* add difrent function to mask lambda scheduler

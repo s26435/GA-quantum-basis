@@ -31,7 +31,7 @@ import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 
-BLOCKS = [14, 9, 4, 2] # Be
+BLOCKS = [14, 9, 4, 2]  # Be
 # BLOCKS = [20, 16, 6, 4]  # Ca
 
 
@@ -46,16 +46,17 @@ class GA_cfg:
     generations: int = 1000
     genome_size: int = sum(BLOCKS)
 
+    # when mask will be smaller then that algorithm will give it penalty
+    min_mask_size: int = 14
+
     # mask weight multiplier
-    # tested values 
-    # .3 -> good but it low energy accuracy -> best -14.643
-    # .001 -> bad -> make algorithm stuck, makes lenght fluctuate too much -> best -14.61
     start_lambda: float = 5e-3
 
     # ga auto stops whrn error is lower
     error_threshold_early_stopping: float = 0.001
+    early_stopping_patience: int = 10
 
-    # GA functions
+    # GA FUNCTIONS
     elite_frac: float = 0.2
     tournament_k: int = 2
     crossover_p: float = 0.9
@@ -66,7 +67,7 @@ class GA_cfg:
     # mask mutation probability
     mask_flip_p: float = 0.05
 
-    # generator parameters
+    # GENERATOR PARAMETERS
     # latent space size
     zdim: int = 16
     # % generated genomes in population
@@ -85,11 +86,12 @@ class GA_cfg:
     log_level: int = 1
 
     # cache storage
-    db_path: str = "cache/energy.sqlite" # ca = "cache/energy_ca.sqlite"
+    db_path: str = "cache/energy.sqlite"  # ca = "cache/energy_ca.sqlite"
 
     # model storage
-    model_from_file: bool = True
-    model_save_path: str = "model_be.ckpt" #  ca = "model_ca.ckpt"
+    model_from_file: bool = False
+    model_load_path: str = "model_be.ckpt"  #  ca = "model_ca.ckpt"
+    model_save_path: str = "model_be.ckpt" 
 
 
 log_handle = Path("out.log")
@@ -690,13 +692,13 @@ class GA:
             weight_decay=self.cfg.weight_decay,
         )
 
-        if not Path(self.cfg.model_save_path).exists() and self.cfg.model_from_file:
+        if not Path(self.cfg.model_load_path).exists() and self.cfg.model_from_file:
             raise FileNotFoundError(
-                f"Model checkpoint file not found: {self.cfg.model_save_path}"
+                f"Model checkpoint file not found: {self.cfg.model_load_path}"
             )
 
         if self.cfg.model_from_file:
-            ckpt = torch.load(self.cfg.model_save_path, map_location=self.cfg.device)
+            ckpt = torch.load(self.cfg.model_load_path, map_location=self.cfg.device)
 
             self.generator.load_state_dict(ckpt["generator"])
             self.policy.load_state_dict(ckpt["policy"])
@@ -769,47 +771,58 @@ class GA:
                 else:
                     miss.append((i, alphas_all[i], mask_all[i], key))
 
+        penalty = 1e4
+
         if miss:
             python_bin = self.cfg.python_bin
             engine_cmd = "molcas"
             max_workers = max(1, int(self.cfg.local_max_workers))
 
-            with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                futures = [
-                    ex.submit(
-                        _run_energy_case,
-                        i,
-                        alphas,
-                        msk,
-                        str(gen_dir),
-                        python_bin,
-                        engine_cmd,
-                        case,
-                    )
-                    for (i, alphas, msk, _key) in miss
-                ]
+            miss_ok = []
+            for idx, alphas, msk, key in miss:
+                if sum(msk) < self.cfg.min_mask_size:
+                    energies[idx] = penalty * 10
+                    self.energy_cache.load(key, penalty, 0)
+                else:
+                    miss_ok.append((idx, alphas, msk, key))
 
-                i2key = {i: key for (i, _a, _m, key) in miss}
+            if miss_ok:
+                with ProcessPoolExecutor(max_workers=max_workers) as ex:
+                    futures = [
+                        ex.submit(
+                            _run_energy_case,
+                            idx,
+                            alphas,
+                            msk,
+                            str(gen_dir),
+                            python_bin,
+                            engine_cmd,
+                            case,
+                        )
+                        for (idx, alphas, msk, _) in miss_ok
+                    ]
 
-                for fut in as_completed(futures):
-                    i, e = fut.result()
-                    energies[i] = float(e)
+                    i2key = {idx: key for (idx, _, _, key) in miss_ok}
 
-                    valid = 1 if (isinstance(e, float) and math.isfinite(e)) else 0
-                    self.energy_cache.load(i2key[i], float(e), valid)
+                    for fut in as_completed(futures):
+                        idx, e = fut.result()
+                        energies[idx] = float(e)
 
-        penalty = 1e4
+                        valid = 1 if (isinstance(e, float) and math.isfinite(e)) else 0
+                        self.energy_cache.load(i2key[idx], float(e), valid)
+
         out = [
             penalty if (e is None or not math.isfinite(float(e))) else float(e)
             for e in energies
         ]
         return torch.tensor(out, dtype=torch.float32, device=population.device)
 
-    def lambda_from_error(self, err_abs, lam_min=1e-5, lam_max=5e-3, e_low=0.003, e_high=0.05):
+    def lambda_from_error(
+        self, err_abs, lam_min=1e-7, lam_max=5e-3, e_low=0.003, e_high=0.05
+    ):
         x = (err_abs - e_low) / (e_high - e_low)
         x = max(0.0, min(1.0, x))
         return lam_min + (lam_max - lam_min) * x
-
 
     def _tournament_select(self, fit: torch.Tensor, n_select: int) -> torch.Tensor:
         """
@@ -929,6 +942,9 @@ class GA:
         best_energy = float("inf")
         best_fit = float("inf")
 
+        best_err_seen = float("inf")
+        patience_counter = 0
+
         curr_lambda = self.cfg.start_lambda
 
         lg("Starting GA...", self.cfg.log_level)
@@ -936,7 +952,7 @@ class GA:
         handle.touch(exist_ok=True)
         with open(handle, "a") as f:
             f.write(
-                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_energy,error,current_lambda\n"
+                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_len,best_energy,error,current_lambda\n"
             )
 
         for gen in range(self.cfg.generations):
@@ -944,9 +960,7 @@ class GA:
 
             self._gen_idx = gen
             fit = self.fitness(pop, pop_mask, "pop")
-            fit_wmask = fit + curr_lambda * (
-                pop_mask.sum(dim=1) / self.cfg.genome_size
-            )
+            fit_wmask = fit + curr_lambda * (pop_mask.sum(dim=1) / self.cfg.genome_size)
 
             lg(
                 f"=======================\nFitness\n=======================\n{fit}\n=======================\n",
@@ -1024,10 +1038,7 @@ class GA:
             lg("Generating population using generation model...", self.cfg.log_level)
             gen_part, logp_g, g_log_std, mask = self.generator.sample(z.detach())
             mask = (mask > 0.5).float()
-            # for i in range(mask.size(0)):
-            #     mask[i] = self._ensure_block_nonempty(
-            #         torch.exp(gen_part[i].detach()), mask[i]
-            #     )
+
             lg(f"Generated {len(gen_part)}", self.cfg.log_level)
             lg(f"Generated {len(mask)}", self.cfg.log_level)
             lg("Caltulationg loss for generated population...", self.cfg.log_level)
@@ -1064,18 +1075,20 @@ class GA:
             if self.err_ema is None:
                 self.err_ema = err
             else:
-                self.err_ema = self.err_ema_beta * self.err_ema + (1 - self.err_ema_beta) * err
+                self.err_ema = (
+                    self.err_ema_beta * self.err_ema + (1 - self.err_ema_beta) * err
+                )
 
             curr_lambda = self.lambda_from_error(self.err_ema)
 
             lg(
-                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | current lambda {curr_lambda:.2e}\n",
+                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | num. of exp in best genome {best_mask.sum().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | current lambda {curr_lambda:.2e}\n",
                 self.cfg.log_level,
             )
 
             with open(handle, "a") as f:
                 f.write(
-                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_energy},{abs(err)},{curr_lambda:.2e}\n"
+                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_mask.sum().item():.3},{best_energy},{abs(err)},{curr_lambda:.2e}\n"
                 )
 
             self.opt.zero_grad()
@@ -1087,10 +1100,24 @@ class GA:
             pop = torch.cat([next_base, gen_part], dim=0)
             pop_mask = torch.cat([next_base_mask, mask], dim=0)
 
+            if err < best_err_seen - 1e-8:
+                best_err_seen = err
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            if err <= self.cfg.error_threshold_early_stopping:
+                break
+
+            if patience_counter >= self.cfg.early_stopping_patience:
+                break
+
             if (self.cfg.ground_truth is not None) and (
-                abs(err)
-                <= self.cfg.error_threshold_early_stopping # or self.cfg.ground_truth > best_energy
+                abs(err) <= self.cfg.error_threshold_early_stopping
             ):
+                break
+
+            if patience_counter >= self.cfg.early_stopping_patience:
                 break
 
         torch.save(
