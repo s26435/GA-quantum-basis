@@ -38,7 +38,7 @@ BLOCKS = [14, 9, 4, 2] # Be
 @dataclass(frozen=True)
 class GA_cfg:
     # true value of energy - used in early stopping, may be None
-    ground_truth: Optional[float] = -14.644
+    ground_truth: Optional[float] = -14.668
 
     # GA
     population_size: int = 30
@@ -47,7 +47,10 @@ class GA_cfg:
     genome_size: int = sum(BLOCKS)
 
     # mask weight multiplier
-    mask_lambda: float = 0.05
+    # tested values 
+    # .3 -> good but it low energy accuracy -> best -14.643
+    # .001 -> bad -> make algorithm stuck, makes lenght fluctuate too much -> best -14.61
+    start_lambda: float = 5e-3
 
     # ga auto stops whrn error is lower
     error_threshold_early_stopping: float = 0.001
@@ -701,6 +704,9 @@ class GA:
             self.opt.load_state_dict(ckpt["opt"])
             self.opt_g.load_state_dict(ckpt["opt_g"])
 
+        self.err_ema = None
+        self.err_ema_beta = 0.9
+
     def fitness(
         self, population: torch.Tensor, pop_mask: torch.Tensor, case: str
     ) -> torch.Tensor:
@@ -742,7 +748,7 @@ class GA:
             m_i = mask_cpu[i]
             m_i = (m_i > 0.5).float()
 
-            a_s, m_s = sanitize_blocks(a, m_i, lo=0.0, hi=1e5, min_ratio=1.2)
+            a_s, m_s = sanitize_blocks(a, m_i, lo=1e-6, hi=1e5, min_ratio=1.2)
 
             alphas_all.append(a_s.tolist())
             mask_all.append([bool(x) for x in m_s.tolist()])
@@ -798,6 +804,12 @@ class GA:
             for e in energies
         ]
         return torch.tensor(out, dtype=torch.float32, device=population.device)
+
+    def lambda_from_error(self, err_abs, lam_min=1e-5, lam_max=5e-3, e_low=0.003, e_high=0.05):
+        x = (err_abs - e_low) / (e_high - e_low)
+        x = max(0.0, min(1.0, x))
+        return lam_min + (lam_max - lam_min) * x
+
 
     def _tournament_select(self, fit: torch.Tensor, n_select: int) -> torch.Tensor:
         """
@@ -917,6 +929,8 @@ class GA:
         best_energy = float("inf")
         best_fit = float("inf")
 
+        curr_lambda = self.cfg.start_lambda
+
         lg("Starting GA...", self.cfg.log_level)
         handle = Path("metrics.csv")
         handle.touch(exist_ok=True)
@@ -930,7 +944,7 @@ class GA:
 
             self._gen_idx = gen
             fit = self.fitness(pop, pop_mask, "pop")
-            fit_wmask = fit + self.cfg.mask_lambda * (
+            fit_wmask = fit + curr_lambda * (
                 pop_mask.sum(dim=1) / self.cfg.genome_size
             )
 
@@ -1024,7 +1038,7 @@ class GA:
                 self.cfg.log_level,
             )
 
-            reward = -gen_energy - self.cfg.mask_lambda * (
+            reward = -gen_energy - curr_lambda * (
                 mask.sum(dim=1) / self.cfg.genome_size
             )
             r_mean = reward.mean()
@@ -1046,7 +1060,13 @@ class GA:
             )
             loss = loss - 1e-3 * entropy_g
 
-            err = best_energy - self.cfg.ground_truth
+            err = abs(best_energy - self.cfg.ground_truth)
+            if self.err_ema is None:
+                self.err_ema = err
+            else:
+                self.err_ema = self.err_ema_beta * self.err_ema + (1 - self.err_ema_beta) * err
+
+            curr_lambda = self.lambda_from_error(self.err_ema)
 
             lg(
                 f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | lr {self.cfg.lr:.2e}\n",
@@ -1069,7 +1089,7 @@ class GA:
 
             if (self.cfg.ground_truth is not None) and (
                 abs(err)
-                <= self.cfg.error_threshold_early_stopping or self.cfg.ground_truth > best_energy
+                <= self.cfg.error_threshold_early_stopping # or self.cfg.ground_truth > best_energy
             ):
                 break
 
@@ -1120,6 +1140,7 @@ if __name__ == "__main__":
         0.17150000,
     ]
 
+    # Calcium
     # seed = [
     #     6809719.36,
     #     829347.437,

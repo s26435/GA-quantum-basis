@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from pathlib import Path
-dir = "runs/run8/" 
+dir = "runs/run10/" 
 dir_anal = dir + "analyze/"
 Path(dir_anal).mkdir(exist_ok=True)
 
@@ -11,7 +11,7 @@ df = pd.read_csv(dir + "metrics.csv")
 
 # generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,lr
 
-ground_truth = -14.644 # -677.509 # 
+ground_truth = -14.668 # -677.509 # 
 plt.plot(df["generation"]+1, df["generator_loss"], color="blue", label="Generator Loss")
 plt.axhline(y=0, color='r', linestyle='-')
 plt.title("Generator Loss")
