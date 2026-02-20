@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from pathlib import Path
-dir = "" # "runs/run12/" 
+dir = "runs/run13/" 
 dir_anal = dir + "analyze/"
 Path(dir_anal).mkdir(exist_ok=True)
 

@@ -64,6 +64,7 @@ def plot_weights_mask_scatter(
     ax.scatter(x2[idx2_on],  y2[idx2_on],  marker="x", label="genome2 active",   color="blue")
     ax.scatter(x2[idx2_off], y2[idx2_off], marker="x", label="genome2 inactive", color="orange")
 
+
     for i in range(n):
         ax.plot(
             [float(x1[i]), float(x2[i])],
@@ -82,7 +83,7 @@ def plot_weights_mask_scatter(
             rel_txt = "n/a"
         else:
             rel_pct = y2[i] / y1[i]
-            rel_txt = f"{rel_pct:.2f}"
+            rel_txt = f"{rel_pct:.5f}"
 
         y_top = float(max(y1[i], y2[i]))
 
@@ -109,11 +110,12 @@ def plot_weights_mask_scatter(
     ax.set_ylabel("value")
     ax.set_title(f"{title} | diffs: {diff.sum().item()}/{n}")
     ax.legend(ncol=2, fontsize=9)
-
+    ax.set_yscale("log")
+    ax.grid(True)
     ymin, ymax = ax.get_ylim()
     ax.set_ylim(ymin, ymax + 0.15 * (ymax - ymin))
 
-    fig.savefig("compare.png", dpi=200)
+    fig.savefig("compare.png")
 
 
 rows = load_populations_csv("tmp.txt", device="cpu")
