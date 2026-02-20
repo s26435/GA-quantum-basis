@@ -3,7 +3,7 @@ from matplotlib import pyplot as plt
 import numpy as np
 
 from pathlib import Path
-dir = ""# "runs/run11/" 
+dir = "" # "runs/run12/" 
 dir_anal = dir + "analyze/"
 Path(dir_anal).mkdir(exist_ok=True)
 
@@ -37,7 +37,7 @@ axs[0, 1].set_xlabel("Generations")
 axs[0, 1].set_ylabel("units")
 axs[0, 1].legend()
 
-axs[1, 0].plot(df["generation"] + 1, df["best_len"], color="blue", label="Average length")
+axs[1, 0].plot(df["generation"] + 1, df["best_len"], color="blue", label="length")
 axs[1, 0].set_title("Length of best genome of population")
 axs[1, 0].set_xlabel("Generations")
 axs[1, 0].set_ylabel("count")

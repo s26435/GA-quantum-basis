@@ -54,7 +54,7 @@ class GA_cfg:
 
     # ga auto stops whrn error is lower
     error_threshold_early_stopping: float = 0.001
-    early_stopping_patience: int = 10
+    early_stopping_patience: int = 30
 
     # GA FUNCTIONS
     elite_frac: float = 0.2
