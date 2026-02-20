@@ -11,6 +11,7 @@
     ```
 5. `analyze.py` - script for generating metric visualization based on `metrics.csv`
 6. `cleanup.sh` - file that <u>DELETES</u> all files created by app
+7. `comp.py` - compares two genomes from tmp.txt file by their's values of exponents
 
 ## Files and directories created by app
 1. `metrics.csv` - contains basic metrics from training:
@@ -21,15 +22,59 @@
     * `best_fit` - value of <u> fitness function</u> of best genome
     * `mean_fit` - mean value of fitness function for whole population
     * `average_length` - average length of genomes in population
+    * `best_length` - length of best genome in each population
     * `best_energy` - value of <u>energy</u> of best genome
     * `error` - error value of best genome: $\text{err} = |E_{\text{ground truth}} - E_{\text{calculated}}|$
-    * `lr` - learning rate of Population Generator
-
+    * `current_lambda` - value of `mask_lambda` updated by scheduler
+ 
 2. `populations.csv` - contains exponents, masks, fitness function values and energy value of every genome in every population created during trianing
 3. `out.log` - contains logs form training
 4. `cache/energy.sqlite` - SQLite databse used to caching energy values
 5. `model.ckpt` - Population Generator checkopint file
 6. `gen_****/` - folders that contains all population's output files from molcas, json input files and INPUT files ready for use
+7. `compare.png` - visualisation of comparison from comp.py
+
+## GA_cfg fields
+1. `ground_truth: Optional[float]` - reference value of energy to calculate error and operate on early stopping
+2. `population_size: int` - size of population in GA
+3. `device: str` - "cuda/"cpu" torch.device name, when you have Nvidia change to "cuda" $\to$ the tensor part of calculations will be faster  
+4. `generations: int` - number of generations in GA
+5. `genome_size: int` - number of starting exponents (it's the max size of exponents as well)
+6. `min_mask_size: int` - minimal number of exponents - under that value the fitness function will give a penalty
+7. `start_lambda: float` - starting value of lambda - it's weigth of mask part of fitness function 
+    $$
+    \text{Loss} = E + \lambda \sum^{\text{mask length}}_{n=0}\text{mask}[n]
+    $$
+    higer value $\to$ smaller the exponent set but higher energy <br>
+    lower value $\to$ bigger exponent set but better energy
+
+
+8. `error_threshold_early_stopping: float` - error value that will stop further training
+9. `early_stopping_patience: int` - the treshold for patience that will stop training to avoid overfitting
+
+### GA mutation and cross parameters
+1. `elite_frac: float` - fraction of population that will be elites (elites are genomes that are moved to new generation without changes)
+2. `tournament_k: int` - strength of turnament selection. Smaller k $\to$ more random selection, bigger $\to$ harsher and more deterministic selection. $k \in [1, \text{population size}]$
+3. `crossover_p: float` - probability of crossover
+4. `mutation_p: float` - probability of mutation
+5. `mutation_sigma: float` - strength of mutation
+6. `mask_flip_p: float` - probability of mask mutation (change in exponents counts)
+
+### Population Generator parameters
+1. `zdim: int` - size of latent space. Laten space is "memory" of population generator, smaller $\to$ model will be faster but it may not be able to model more complex relationships
+2. `gen_percent: float` - fraction of population that is created by population generator (PG)
+3. `lr: float` - startin learning rate of PG
+4. `weight_decay: float` - multiplayer of L1 and L2 regularizations
+5. `local_max_workers: int` - number of threds used in training
+
+### Work Dirs and Binary Locations
+1. `work_root: str` - location of working directory - all files and directories will be created there
+2. `python_bin: str` - location of python binary
+3. `db_path: str` - location of .sqlite file (caching database)
+4. `model_from_file: bool` - True program will try load checkpoint file with pretrained model (location: model_load_path), False will train new model from scratch
+5. `model_load_path: str` - location of checkpoint file (.ckpt)
+6. `model_save_path: str` - location of saved checkpoint file
+
 
 ## Important
 1. Once in a while you need to clean /tmp/ becouse molcas doesn't clean its temp files (140GB /tmp/ incident)
@@ -39,4 +84,5 @@
 * saving and loading GA_config preset
 * add option to not train population Generator during GA
 * mutation change may be better for low error training
-* add difrent function to mask lambda scheduler
+* add diffrent function to mask lambda scheduler
+* add scheduler to mutation sigma
