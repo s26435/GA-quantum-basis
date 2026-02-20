@@ -42,9 +42,9 @@
 5. `genome_size: int` - number of starting exponents (it's the max size of exponents as well)
 6. `min_mask_size: int` - minimal number of exponents - under that value the fitness function will give a penalty
 7. `start_lambda: float` - starting value of lambda - it's weigth of mask part of fitness function 
-    $$
+    $
     \text{Loss} = E + \lambda \sum^{\text{mask length}}_{n=0}\text{mask}[n]
-    $$
+    $<br>
     higer value $\to$ smaller the exponent set but higher energy <br>
     lower value $\to$ bigger exponent set but better energy
 
