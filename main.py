@@ -79,8 +79,9 @@ class GA_cfg:
     local_max_workers: int = 4
 
     # directories
-    work_root: str = "/home/janek/GA_proj"
-    python_bin: str = "/home/janek/GA_proj/venv/bin/python3"
+    work_root: str = "/home/tezriem/Documents/GA-quantum-basis"
+    python_bin: str = "/home/tezriem/miniconda3/envs/gabasis/bin/python"
+    molcas_dir: str = "/opt/openmolcas/pymolcas"
 
     # logging
     log_level: int = 1
@@ -775,7 +776,7 @@ class GA:
 
         if miss:
             python_bin = self.cfg.python_bin
-            engine_cmd = "molcas"
+            engine_cmd = self.cfg.molcas_dir
             max_workers = max(1, int(self.cfg.local_max_workers))
 
             miss_ok = []
@@ -1082,7 +1083,7 @@ class GA:
             curr_lambda = self.lambda_from_error(self.err_ema)
 
             lg(
-                f"gen {gen:04d} | loss(gen) {float(loss):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | num. of exp in best genome {best_mask.sum().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | current lambda {curr_lambda:.2e}\n",
+                f"gen {gen:04d} | loss(gen) {float(loss.detach()):.6f} | % of correct Generator Population {(gen_energy < (1e4 * 0.999)).float().mean().item():.3} | % of correct in whole population {(fit < (1e4 * 0.999)).float().mean().item():.3} | best(pop) fitness {best_fit:.6f} | average num. of exp {pop_mask.sum(dim=1).mean().item():.3} | num. of exp in best genome {best_mask.sum().item():.3} | energy of best genome {best_energy} | abs error of best genome {abs(err)} | current lambda {curr_lambda:.2e}\n",
                 self.cfg.log_level,
             )
 
