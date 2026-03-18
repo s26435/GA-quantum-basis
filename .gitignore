@@ -13,3 +13,5 @@ venv/
 analyze/
 compare.png
 tmp.txt
+licenses/
+workspace/

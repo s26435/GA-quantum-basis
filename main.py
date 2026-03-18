@@ -6,6 +6,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import math
 import traceback
 import hashlib
+import os
 
 import numpy as np
 
@@ -30,9 +31,13 @@ import warnings
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-
-BLOCKS = [14, 9, 4, 2]  # Be
+BLOCKS = [11, 7, 3, 2]
+# BLOCKS = [14, 9, 4, 2]  # Be
 # BLOCKS = [20, 16, 6, 4]  # Ca
+
+BASE_DIR = Path(__file__).resolve().parent
+DEFAULT_WORK_ROOT = (BASE_DIR / "workspace").resolve()
+DEFAULT_REFERENCE_DIR = (DEFAULT_WORK_ROOT / "reference").resolve()
 
 
 @dataclass(frozen=True)
@@ -79,9 +84,27 @@ class GA_cfg:
     local_max_workers: int = 4
 
     # directories
-    work_root: str = "/home/tezriem/Documents/GA-quantum-basis"
+    work_root: str = str(
+        DEFAULT_WORK_ROOT
+    )  # "/home/tezriem/Documents/GA-quantum-basis/workspace"
     python_bin: str = "/home/tezriem/miniconda3/envs/gabasis/bin/python"
-    molcas_dir: str = "/opt/openmolcas/pymolcas"
+    molcas_cmd: str = "molcas"
+    molcas_root: str = "/home/tezriem/molcas"
+    molcas_dir: str = "/home/tezriem/molcas"
+    # CMOCORR
+    cmocorr_enabled: bool = True
+    cmocorr_ref_orb: Optional[str] = None
+    cmocorr_bootstrap_from_seed: bool = True
+    cmocorr_reference_dir: str = str(
+        DEFAULT_REFERENCE_DIR
+    )  # "/home/tezriem/Documents/GA-quantum-basis/workspace/reference"
+
+    # TODO zmienić bo brzydkie af
+    cmocorr_orbital_candidates: Tuple[str, ...] = ("RASORB",)
+    cmocorr_t1: float = 0.90
+    cmocorr_t2: float = 0.95
+    cmocorr_lambda: float = 1.0
+    cmocorr_fail_penalty: float = 1e4
 
     # logging
     log_level: int = 1
@@ -92,7 +115,7 @@ class GA_cfg:
     # model storage
     model_from_file: bool = False
     model_load_path: str = "model_be.ckpt"  #  ca = "model_ca.ckpt"
-    model_save_path: str = "model_be.ckpt" 
+    model_save_path: str = "model_be.ckpt"
 
 
 log_handle = Path("out.log")
@@ -100,6 +123,90 @@ log_handle.touch(exist_ok=True)
 
 population_handle = Path("populations.csv")
 population_handle.touch(exist_ok=True)
+
+
+def materialize_rasorb_from_jobiph(
+    wd: Path,
+    molcas_cmd: str,
+    molcas_root: str,
+    fail_log: Path,
+) -> Optional[Path]:
+    wd = wd.resolve()
+
+    rasorb = wd / "RASORB"
+    if rasorb.exists() and rasorb.is_file():
+        return rasorb
+
+    jobiph_candidates = [
+        wd / "JOBIPH",
+        wd / "JobIph",
+        wd / "INPUT.JobIph",
+        wd / "molcas_work" / "JOBIPH",
+        wd / "molcas_work" / "JobIph",
+        wd / "molcas_work" / "INPUT.JobIph",
+    ]
+    jobiph = next((p for p in jobiph_candidates if p.exists() and p.is_file()), None)
+    if jobiph is None:
+        return None
+
+    local_jobold = wd / "JOBOLD"
+    if local_jobold.exists():
+        local_jobold.unlink()
+    shutil.copy2(jobiph, local_jobold)
+
+    orbonly_inp = wd / "make_rasorb.input"
+    orbonly_log = wd / "make_rasorb.log"
+
+    orbonly_inp.write_text(
+        "&RASSCF\nORBOnly\nOUTOrbital=Natural; 1\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    for k in [
+        "MOLCAS",
+        "WorkDir",
+        "MOLCAS_WORKDIR",
+        "MOLCAS_NEW_WORKDIR",
+        "MOLCAS_OUTPUT",
+        "MOLCAS_PROJECT",
+        "MOLCAS_NPROCS",
+    ]:
+        env.pop(k, None)
+
+    workdir = (wd / "orbonly_work").resolve()
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    env["MOLCAS"] = str(Path(molcas_root).resolve())
+    env["WorkDir"] = str(workdir)
+    env["MOLCAS_WORKDIR"] = str(workdir)
+    env["MOLCAS_NEW_WORKDIR"] = "YES"
+    env["MOLCAS_OUTPUT"] = "WORKDIR"
+    env["MOLCAS_PROJECT"] = "NAME"
+    env["MOLCAS_NPROCS"] = "1"
+
+    with orbonly_log.open("w", encoding="utf-8") as f:
+        proc = subprocess.run(
+            [molcas_cmd, "make_rasorb.input"],
+            cwd=str(wd),
+            env=env,
+            stdout=f,
+            stderr=subprocess.STDOUT,
+        )
+
+    for p in [wd / "RASORB", workdir / "RASORB"]:
+        if p.exists() and p.is_file():
+            if p.parent != wd:
+                shutil.copy2(p, wd / "RASORB")
+            return wd / "RASORB"
+
+    with fail_log.open("a", encoding="utf-8") as f:
+        f.write("\n[ORBONLY FAILED TO MATERIALIZE RASORB]\n")
+        f.write(f"jobiph={jobiph}\n")
+        f.write(f"orbonly_log={orbonly_log}\n")
+        f.write(f"returncode={proc.returncode}\n")
+
+    return None
 
 
 def lg(text: str, log_level: int = 1):
@@ -118,6 +225,20 @@ def lg(text: str, log_level: int = 1):
             file.write(msg + "\n")
 
 
+@dataclass
+class CaseResult:
+    idx: int
+    energy: float
+    valid: int
+    orbital_penalty: float
+    total_loss: float
+    mask_len: int
+    orbital_file: Optional[str]
+    run_out_path: str
+    cmocorr_log_path: Optional[str]
+    failure_reason: Optional[str] = None
+
+
 class CacheDatabase:
     def __init__(self, db_path: Union[str, Path]):
         """
@@ -128,17 +249,19 @@ class CacheDatabase:
         """
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-
         conn = sqlite3.connect(str(db_path))
         try:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("""
-            CREATE TABLE IF NOT EXISTS energy_cache (
-                key TEXT PRIMARY KEY,
-                energy REAL NOT NULL,
-                valid INTEGER NOT NULL,
-                created_at TEXT DEFAULT (datetime('now'))
-            );
+                CREATE TABLE IF NOT EXISTS energy_cache (
+                    key TEXT PRIMARY KEY,
+                    energy REAL NOT NULL,
+                    orbital_penalty REAL NOT NULL DEFAULT 0.0,
+                    total_loss REAL NOT NULL DEFAULT 0.0,
+                    valid INTEGER NOT NULL,
+                    status_json TEXT,
+                    created_at TEXT DEFAULT (datetime('now'))
+                );
             """)
             conn.commit()
         finally:
@@ -154,7 +277,7 @@ class CacheDatabase:
         finally:
             conn.close()
 
-    def check(self, key: str) -> Optional[Tuple[float, int]]:
+    def check(self, key: str) -> Optional[dict]:
         """
         Checking if given key is in database
 
@@ -165,12 +288,24 @@ class CacheDatabase:
         """
         with self.connect() as conn:
             row = conn.execute(
-                "SELECT energy, valid FROM energy_cache WHERE key=?;",
+                """
+                SELECT energy, orbital_penalty, total_loss, valid, status_json
+                FROM energy_cache
+                WHERE key=?;
+                """,
                 (key,),
             ).fetchone()
-            return None if row is None else (float(row[0]), int(row[1]))
+            if row is None:
+                return None
+            return {
+                "energy": float(row[0]),
+                "orbital_penalty": float(row[1]),
+                "total_loss": float(row[2]),
+                "valid": int(row[3]),
+                "status_json": row[4],
+            }
 
-    def load(self, key: str, energy: float, valid: int):
+    def load(self, key: str, result: CaseResult):
         """
         Uploads genome to database
 
@@ -181,24 +316,32 @@ class CacheDatabase:
         :param valid: 1 if is valid 0 if not
         :type valid: int
         """
-        try:
-            e = float(energy)
-        except Exception:
-            e = 0.0
-            valid = 0
-
-        if not math.isfinite(e):
-            e = 0.0
-            valid = 0
-
-        try:
-            with self.connect() as conn:
-                conn.execute(
-                    "INSERT OR REPLACE INTO energy_cache(key, energy, valid) VALUES(?,?,?);",
-                    (key, e, int(valid)),
-                )
-        except Exception as err:
-            print(f"{err} | e={e} valid={valid} key={key}")
+        payload = {
+            "idx": result.idx,
+            "orbital_file": result.orbital_file,
+            "run_out_path": result.run_out_path,
+            "cmocorr_log_path": result.cmocorr_log_path,
+            "failure_reason": result.failure_reason,
+            "mask_len": result.mask_len,
+        }
+        with self.connect() as conn:
+            conn.execute(
+                """
+                    INSERT OR REPLACE INTO energy_cache
+                    (key, energy, orbital_penalty, total_loss, valid, status_json)
+                    VALUES (?, ?, ?, ?, ?, ?);
+                    """,
+                (
+                    key,
+                    float(result.energy) if math.isfinite(result.energy) else 0.0,
+                    float(result.orbital_penalty),
+                    float(result.total_loss)
+                    if math.isfinite(result.total_loss)
+                    else 0.0,
+                    int(result.valid),
+                    json.dumps(payload, ensure_ascii=False),
+                ),
+            )
 
 
 def random_variation_ordered(seq):
@@ -367,52 +510,209 @@ def sanitize_blocks(
     return torch.cat(parts_a, dim=0), torch.cat(parts_m, dim=0)
 
 
+def file_sha256(path: Union[str, Path]) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def hash_case_context(
+    alphas: torch.Tensor,
+    mask: torch.Tensor,
+    template_path: Union[str, Path],
+    ref_orb_path: Optional[Union[str, Path]],
+    cmocorr_t1: float,
+    cmocorr_t2: float,
+    cmocorr_enabled: bool,
+) -> str:
+    base = hash_alphas(alphas, mask)
+    h = hashlib.blake2b(digest_size=16)
+    h.update(base.encode("utf-8"))
+    h.update(str(Path(template_path)).encode("utf-8"))
+    if Path(template_path).exists():
+        h.update(file_sha256(template_path).encode("utf-8"))
+    h.update(str(bool(cmocorr_enabled)).encode("utf-8"))
+    h.update(f"{cmocorr_t1:.6f}|{cmocorr_t2:.6f}".encode("utf-8"))
+    if ref_orb_path is not None:
+        ref_orb_path = Path(ref_orb_path)
+        h.update(str(ref_orb_path).encode("utf-8"))
+        if ref_orb_path.exists():
+            h.update(file_sha256(ref_orb_path).encode("utf-8"))
+    return h.hexdigest()
+
+
+def find_candidate_orbital_file(
+    wd: Path,
+    candidates: Tuple[str, ...] = ("INPUT.RasOrb",),
+    project_name: Optional[str] = None,
+    started_at: Optional[float] = None,
+) -> Optional[Path]:
+    p = (wd / "INPUT.RasOrb").resolve()
+    if p.exists() and p.is_file():
+        return p
+    return None
+
+
+def run_cmocorr(
+    wd: Path,
+    molcas_cmd: str,
+    molcas_root: str,
+    python_bin: str,
+    ref_orb: Union[str, Path],
+    chk_orb: Union[str, Path],
+    t1: float,
+    t2: float,
+    fail_penalty: float,
+) -> Tuple[float, Optional[Path], Optional[str]]:
+    wd = Path(wd).resolve()
+    cmowd = (wd / "cmocorr").resolve()
+    cmowd.mkdir(parents=True, exist_ok=True)
+
+    ref_orb = Path(ref_orb).resolve()
+    chk_orb = Path(chk_orb).resolve()
+
+    if not ref_orb.exists():
+        return fail_penalty, None, f"CMOCORR ref orbital file not found: {ref_orb}"
+    if not chk_orb.exists():
+        return fail_penalty, None, f"CMOCORR chk orbital file not found: {chk_orb}"
+
+    cmoref = cmowd / "CMOREF"
+    cmochk = cmowd / "CMOCHK"
+    inp = cmowd / "cmocorr.input"
+    log = cmowd / "cmocorr.log"
+
+    for p in (cmoref, cmochk, inp, log):
+        try:
+            if p.exists() or p.is_symlink():
+                p.unlink()
+        except IsADirectoryError:
+            shutil.rmtree(p)
+
+    shutil.copy2(ref_orb, cmoref)
+    shutil.copy2(chk_orb, cmochk)
+
+    inp.write_text(
+        f"&CMOCORR\nDoOrbitals\nThresholds\n {t1} {t2}\n",
+        encoding="utf-8",
+    )
+
+    env = os.environ.copy()
+    for k in [
+        "MOLCAS",
+        "WorkDir",
+        "MOLCAS_WORKDIR",
+        "MOLCAS_NEW_WORKDIR",
+        "MOLCAS_OUTPUT",
+        "MOLCAS_PROJECT",
+        "MOLCAS_NPROCS",
+    ]:
+        env.pop(k, None)
+
+    env["MOLCAS"] = str(Path(molcas_root).resolve())
+    env["WorkDir"] = str(cmowd)
+    env["MOLCAS_WORKDIR"] = str(cmowd)
+    env["MOLCAS_NEW_WORKDIR"] = "YES"
+    env["MOLCAS_OUTPUT"] = "WORKDIR"
+    env["MOLCAS_PROJECT"] = "NAME"
+    env["MOLCAS_NPROCS"] = "1"
+
+    with log.open("w", encoding="utf-8") as f:
+        proc = subprocess.run(
+            [molcas_cmd, "cmocorr.input"],
+            cwd=str(cmowd),
+            env=env,
+            stdout=f,
+            stderr=subprocess.STDOUT,
+        )
+
+    if proc.returncode != 0:
+        debug = sorted([p.name for p in cmowd.iterdir()])
+        return (
+            fail_penalty,
+            log,
+            f"CMOCORR failed, rc={proc.returncode}, files_in_cmowd={debug}",
+        )
+
+    parse_cmd = [
+        python_bin,
+        str(wd.parent / "parse_cmocorr.py"),
+        str(log),
+        "--t1",
+        str(t1),
+    ]
+    p = subprocess.run(parse_cmd, capture_output=True, text=True)
+
+    if p.returncode != 0:
+        return (
+            fail_penalty,
+            log,
+            f"parse_cmocorr failed, rc={p.returncode}, stderr={p.stderr}",
+        )
+
+    try:
+        data = json.loads(p.stdout)
+        penalty = float(data.get("penalty", fail_penalty))
+        return penalty, log, None
+    except Exception as e:
+        return fail_penalty, log, f"parse_cmocorr json decode failed: {e!r}"
+
+
 def _run_energy_case(
     i: int,
     alphas: List[float],
     mask: List[bool],
     gen_dir_str: str,
     python_bin: str,
-    engine_cmd: str,
+    molcas_cmd: str,
+    molcas_root: str,
     case: str,
-) -> Tuple[int, float]:
-    """
-    Runs one job of calculation energy, energy could be nan
-
-    :param i: id of a job
-    :type i: int
-    :param alphas: genome
-    :type alphas: List[float]
-    :param mask: mask
-    :type mask: List[bool]
-    :param gen_dir_str: location of output directory
-    :type gen_dir_str: str
-    :param python_bin: python binary location
-    :type python_bin: str
-    :param engine_cmd: molcas binary location / command
-    :type engine_cmd: str
-    :param case: name of prefix for folder name of case - "gen"/"pop"
-    :type case: str
-    :return: tuple of id of job and calculated energy
-    :rtype: Tuple[int, float]
-    """
-    gen_dir = Path(gen_dir_str)
-    wd = gen_dir / f"{case}_case_{i:04d}"
+    mask_lambda: float,
+    cmocorr_enabled: bool,
+    cmocorr_ref_orb: Optional[str],
+    cmocorr_orbital_candidates: Tuple[str, ...],
+    cmocorr_t1: float,
+    cmocorr_t2: float,
+    cmocorr_lambda: float,
+    cmocorr_fail_penalty: float,
+) -> CaseResult:
+    gen_dir = Path(gen_dir_str).resolve()
+    wd = (gen_dir / f"{case}_case_{i:04d}").resolve()
     wd.mkdir(parents=True, exist_ok=True)
+
+    molcas_workdir = (wd / "molcas_work").resolve()
+    molcas_workdir.mkdir(parents=True, exist_ok=True)
 
     run_out = wd / "run.out"
     run_out.write_text("", encoding="utf-8")
     energy_txt = wd / "energy.txt"
 
-    if len(alphas) != len(mask):
-        run_out.write_text(
-            f"[BAD INPUT] len(alphas)={len(alphas)} != len(mask)={len(mask)}\n",
-            encoding="utf-8",
+    mask_len = int(sum(bool(x) for x in mask))
+
+    def _fail(reason: str) -> CaseResult:
+        return CaseResult(
+            idx=i,
+            energy=float("nan"),
+            valid=0,
+            orbital_penalty=cmocorr_fail_penalty if cmocorr_enabled else 0.0,
+            total_loss=float("inf"),
+            mask_len=mask_len,
+            orbital_file=None,
+            run_out_path=str(run_out),
+            cmocorr_log_path=None,
+            failure_reason=reason,
         )
-        energy_txt.write_text("nan\n", encoding="utf-8")
-        return i, float("nan")
 
     try:
+        if len(alphas) != len(mask):
+            run_out.write_text(
+                f"[BAD INPUT] len(alphas)={len(alphas)} != len(mask)={len(mask)}\n",
+                encoding="utf-8",
+            )
+            energy_txt.write_text("nan\n", encoding="utf-8")
+            return _fail("bad_input_length")
+
         params_path = wd / f"params_{case}_{i:04d}.json"
         params_path.write_text(
             json.dumps({"alphas": alphas, "mask": mask}),
@@ -439,21 +739,65 @@ def _run_energy_case(
                 f"STDERR:\n{p.stderr}\n",
                 encoding="utf-8",
             )
-            return i, float("nan")
+            return _fail("build_input_failed")
 
+        env = os.environ.copy()
+        for k in [
+            "MOLCAS",
+            "WorkDir",
+            "MOLCAS_WORKDIR",
+            "MOLCAS_NEW_WORKDIR",
+            "MOLCAS_OUTPUT",
+            "MOLCAS_PROJECT",
+            "MOLCAS_NPROCS",
+        ]:
+            env.pop(k, None)
+
+        env["MOLCAS"] = str(Path(molcas_root).resolve())
+        env["WorkDir"] = str(molcas_workdir)
+        env["MOLCAS_WORKDIR"] = str(molcas_workdir)
+        env["MOLCAS_NEW_WORKDIR"] = "YES"
+        env["MOLCAS_OUTPUT"] = "WORKDIR"
+        env["MOLCAS_PROJECT"] = "NAME"
+        env["MOLCAS_NPROCS"] = "1"
+
+        # jeden open("w"), bez kasowania własnego debugu
         with run_out.open("w", encoding="utf-8") as f:
+            f.write(f"[DEBUG] molcas_cmd={molcas_cmd}\n")
+            f.write(f"[DEBUG] molcas_root={molcas_root}\n")
+            f.write(f"[DEBUG] cwd={wd}\n")
+            f.write(f"[DEBUG] workdir={molcas_workdir}\n\n")
+
             p3 = subprocess.run(
-                [engine_cmd, "INPUT"],
+                [molcas_cmd, "INPUT"],
                 cwd=str(wd),
+                env=env,
                 stdout=f,
                 stderr=subprocess.STDOUT,
             )
 
         if p3.returncode != 0:
             energy_txt.write_text("nan\n", encoding="utf-8")
+
+            try:
+                tail_lines = run_out.read_text(
+                    encoding="utf-8", errors="ignore"
+                ).splitlines()[-120:]
+                tail_text = "\n".join(tail_lines)
+            except Exception:
+                tail_text = "<could not read run.out>"
+
             with run_out.open("a", encoding="utf-8") as f:
                 f.write(f"\n[molcas FAILED] returncode={p3.returncode}\n")
-            return i, float("nan")
+                f.write(f"[molcas_workdir] {molcas_workdir}\n")
+                f.write("[tail run.out]\n")
+                f.write(tail_text + "\n")
+
+            return _fail(
+                f"molcas_failed_rc_{p3.returncode}; "
+                f"run_out={run_out}; workdir={molcas_workdir}; "
+                f"tail={tail_text[-1000:]}"
+            )
 
         parse_cmd = [python_bin, str(gen_dir / "parse_energy.py"), str(run_out)]
         p2 = subprocess.run(parse_cmd, capture_output=True, text=True)
@@ -465,22 +809,93 @@ def _run_energy_case(
                 f.write(f"cmd: {parse_cmd}\n")
                 f.write("\nSTDOUT:\n" + p2.stdout + "\n")
                 f.write("\nSTDERR:\n" + p2.stderr + "\n")
-            return i, float("nan")
+            return _fail("parse_energy_failed")
 
-        s = p2.stdout.strip()
-        e = float(s)
-        energy_txt.write_text(f"{e}\n", encoding="utf-8")
-        return i, e
+        energy = float(p2.stdout.strip())
+        energy_txt.write_text(f"{energy}\n", encoding="utf-8")
+
+        orbital_penalty = 0.0
+        cmocorr_log_path = None
+        failure_reason = None
+
+        project = "INPUT"
+
+        orb_candidates = [
+            molcas_workdir / f"{project}.RasOrb.1",
+            molcas_workdir / f"{project}.RasOrb",
+            wd / f"{project}.RasOrb.1",
+            wd / f"{project}.RasOrb",
+            molcas_workdir / "RASORB",
+            wd / "RASORB",
+        ]
+
+        orb = None
+        for p in orb_candidates:
+            if p.exists() and p.is_file():
+                orb = p.resolve()
+                break
+
+        if orb is not None and orb.parent != wd:
+            target = wd / orb.name
+            shutil.copy2(orb, target)
+            orb = target.resolve()
+
+        orbital_file = str(orb) if orb else None
+
+        if cmocorr_enabled:
+            if not cmocorr_ref_orb:
+                orbital_penalty = cmocorr_fail_penalty
+                failure_reason = "cmocorr_ref_orb_missing"
+            elif orb is None:
+                orbital_penalty = cmocorr_fail_penalty
+                failure_reason = "candidate_orbital_not_found"
+            else:
+                raw_penalty, cmolog, cmofail = run_cmocorr(
+                    wd=wd,
+                    molcas_cmd=molcas_cmd,
+                    molcas_root=molcas_root,
+                    python_bin=python_bin,
+                    ref_orb=cmocorr_ref_orb,
+                    chk_orb=orb,
+                    t1=cmocorr_t1,
+                    t2=cmocorr_t2,
+                    fail_penalty=cmocorr_fail_penalty,
+                )
+                orbital_penalty = raw_penalty
+                cmocorr_log_path = str(cmolog) if cmolog else None
+                if cmofail is not None:
+                    failure_reason = (
+                        f"{cmofail}; ref={cmocorr_ref_orb}; chk={orb}; "
+                        f"wd_files={[p.name for p in sorted(wd.iterdir())]}"
+                    )
+
+        total_loss = (
+            float(energy) + mask_lambda * mask_len + cmocorr_lambda * orbital_penalty
+        )
+
+        return CaseResult(
+            idx=i,
+            energy=float(energy),
+            valid=1,
+            orbital_penalty=float(orbital_penalty),
+            total_loss=float(total_loss),
+            mask_len=mask_len,
+            orbital_file=orbital_file,
+            run_out_path=str(run_out),
+            cmocorr_log_path=cmocorr_log_path,
+            failure_reason=failure_reason,
+        )
 
     except Exception as e:
+        tb = traceback.format_exc()
         energy_txt.write_text("nan\n", encoding="utf-8")
         with run_out.open("a", encoding="utf-8") as f:
             f.write("\n[WORKER CRASH]\n")
             f.write(f"type: {type(e).__name__}\n")
             f.write(f"repr: {repr(e)}\n")
             f.write("\nTRACEBACK:\n")
-            f.write(traceback.format_exc())
-        return i, float("nan")
+            f.write(tb)
+        return _fail(f"worker_crash_{type(e).__name__}: {e!r}")
 
 
 def hash_alphas(alphas: torch.Tensor, mask: torch.Tensor) -> str:
@@ -710,34 +1125,126 @@ class GA:
         self.err_ema = None
         self.err_ema_beta = 0.9
 
+        self._resolved_cmocorr_ref_orb: Optional[str] = None
+        self._last_raw_energies: Optional[torch.Tensor] = None
+
+    def _prepare_case_files(self, target_dir: Path):
+        target_dir.mkdir(parents=True, exist_ok=True)
+        base = Path(__file__).resolve().parent
+
+        shutil.copy2(base / "INPUT", target_dir / "INPUT.template")
+        shutil.copy2(base / "build_input.py", target_dir / "build_input.py")
+        shutil.copy2(base / "parse_energy.py", target_dir / "parse_energy.py")
+
+        if self.cfg.cmocorr_enabled:
+            shutil.copy2(base / "parse_cmocorr.py", target_dir / "parse_cmocorr.py")
+
+    def _resolve_cmocorr_reference(self, seed_alphas: List[float]):
+        if not self.cfg.cmocorr_enabled:
+            self._resolved_cmocorr_ref_orb = None
+            return
+
+        if self.cfg.cmocorr_ref_orb is not None:
+            p = Path(self.cfg.cmocorr_ref_orb).expanduser().resolve()
+            if not p.exists():
+                raise FileNotFoundError(
+                    f"CMOCORR reference orbital file not found: {p}"
+                )
+            self._resolved_cmocorr_ref_orb = str(p)
+            lg(f"Using external CMOCORR reference: {p}", self.cfg.log_level)
+            return
+
+        if not self.cfg.cmocorr_bootstrap_from_seed:
+            raise RuntimeError(
+                "CMOCORR is enabled, but no cmocorr_ref_orb was given and bootstrap is disabled."
+            )
+
+        ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
+        self._prepare_case_files(ref_dir)
+
+        cached_ref = ref_dir / "reference.orb"
+        if cached_ref.exists():
+            self._resolved_cmocorr_ref_orb = str(cached_ref)
+            lg(
+                f"Using cached bootstrap CMOCORR reference: {cached_ref}",
+                self.cfg.log_level,
+            )
+            return
+
+        full_mask = [True] * len(seed_alphas)
+        molcas_cmd = getattr(self.cfg, "molcas_cmd", self.cfg.molcas_dir)
+
+        lg(
+            "Building bootstrap CMOCORR reference from original seed...",
+            self.cfg.log_level,
+        )
+
+        result = _run_energy_case(
+            i=0,
+            alphas=list(seed_alphas),
+            mask=full_mask,
+            gen_dir_str=str(ref_dir),
+            python_bin=self.cfg.python_bin,
+            molcas_cmd=molcas_cmd,
+            molcas_root=self.cfg.molcas_root,
+            case="reference",
+            mask_lambda=0.0,
+            cmocorr_enabled=False,
+            cmocorr_ref_orb=None,
+            cmocorr_orbital_candidates=self.cfg.cmocorr_orbital_candidates,
+            cmocorr_t1=self.cfg.cmocorr_t1,
+            cmocorr_t2=self.cfg.cmocorr_t2,
+            cmocorr_lambda=0.0,
+            cmocorr_fail_penalty=self.cfg.cmocorr_fail_penalty,
+        )
+
+        if result.valid != 1:
+            raise RuntimeError(
+                "Bootstrap reference calculation failed:\n"
+                f"reason: {result.failure_reason}\n"
+                f"run_out: {result.run_out_path}\n"
+                f"orbital_file: {result.orbital_file}\n"
+            )
+
+        if result.orbital_file is None:
+            ref_case_dir = ref_dir / "reference_case_0000"
+            files = []
+            if ref_case_dir.exists():
+                files = sorted(p.name for p in ref_case_dir.iterdir())
+
+            raise RuntimeError(
+                "Bootstrap reference calculation finished, but no orbital file was found.\n"
+                f"run_out: {result.run_out_path}\n"
+                f"failure_reason: {result.failure_reason}\n"
+                f"files_in_reference_case: {files}\n"
+            )
+
+        src = Path(result.orbital_file).resolve()
+        if not src.exists():
+            raise FileNotFoundError(
+                f"Reference orbital file not found after build: {src}"
+            )
+
+        shutil.copy2(src, cached_ref)
+        self._resolved_cmocorr_ref_orb = str(cached_ref.resolve())
+
+        lg(
+            f"Bootstrap CMOCORR reference created: {self._resolved_cmocorr_ref_orb}",
+            self.cfg.log_level,
+        )
+
     def fitness(
         self, population: torch.Tensor, pop_mask: torch.Tensor, case: str
     ) -> torch.Tensor:
         """
-        Fitness function for population
+        Fitness function for population.
 
-        :param population: tensor of population
-        :type population: torch.Tensor
-        :param pop_mask: tensor of masks of population
-        :type pop_mask: torch.Tensor
-        :param case:name of prefix for folder name of case - "gen"/"pop"
-        :type case: str
-        :return: tensor of values of energy
-        :rtype: Tensor
+        energy + lambda_mask * mask_len + lambda_cmocorr * orbital_penalty
         """
+
         B = population.size(0)
-
         gen_dir = Path(self.cfg.work_root) / f"gen_{self._gen_idx:04d}"
-        gen_dir.mkdir(parents=True, exist_ok=True)
-
-        base = Path(__file__).resolve().parent
-        shutil.copy2(base / "INPUT", gen_dir / "INPUT.template")
-        shutil.copy2(base / "build_input.py", gen_dir / "build_input.py")
-        shutil.copy2(base / "parse_energy.py", gen_dir / "parse_energy.py")
-
-        for p in ["INPUT.template", "build_input.py", "parse_energy.py"]:
-            if not (gen_dir / p).exists():
-                raise RuntimeError(f"File do not exist: {(gen_dir / p)}")
+        self._prepare_case_files(gen_dir)
 
         pop_cpu = population.detach().cpu()
         mask_cpu = pop_mask.detach().cpu()
@@ -746,76 +1253,137 @@ class GA:
         mask_all: List[List[bool]] = []
         keys: List[str] = []
 
+        mask_lambda = float(getattr(self, "_current_lambda", self.cfg.start_lambda))
+
         for i in range(B):
             a = torch.exp(pop_cpu[i])
-            m_i = mask_cpu[i]
-            m_i = (m_i > 0.5).float()
+            m_i = (mask_cpu[i] > 0.5).float()
 
             a_s, m_s = sanitize_blocks(a, m_i, lo=1e-6, hi=1e5, min_ratio=1.2)
 
             alphas_all.append(a_s.tolist())
             mask_all.append([bool(x) for x in m_s.tolist()])
 
-            keys.append(hash_alphas(a_s, m_s))
+            key = hash_case_context(
+                alphas=a_s,
+                mask=m_s,
+                template_path=gen_dir / "INPUT.template",
+                ref_orb_path=self._resolved_cmocorr_ref_orb,
+                cmocorr_t1=self.cfg.cmocorr_t1,
+                cmocorr_t2=self.cfg.cmocorr_t2,
+                cmocorr_enabled=self.cfg.cmocorr_enabled,
+            )
+            keys.append(key)
 
-        energies: List[float | None] = [None] * B
+        losses: List[float | None] = [None] * B
+        raw_energies: List[float | None] = [None] * B
         miss: List[tuple[int, List[float], List[bool], str]] = []
 
         for i, key in enumerate(keys):
             hit = self.energy_cache.check(key)
+
             if hit is None:
                 miss.append((i, alphas_all[i], mask_all[i], key))
+                continue
+
+            total_loss = float(hit["total_loss"])
+            energy = float(hit["energy"])
+            valid = int(hit["valid"])
+
+            if valid == 1 and math.isfinite(total_loss):
+                losses[i] = total_loss
+                raw_energies[i] = energy
             else:
-                e, valid = hit
-                if valid == 1 and math.isfinite(e):
-                    energies[i] = float(e)
-                else:
-                    miss.append((i, alphas_all[i], mask_all[i], key))
+                miss.append((i, alphas_all[i], mask_all[i], key))
 
         penalty = 1e4
 
         if miss:
             python_bin = self.cfg.python_bin
-            engine_cmd = self.cfg.molcas_dir
+            molcas_cmd = getattr(self.cfg, "molcas_cmd", self.cfg.molcas_dir)
             max_workers = max(1, int(self.cfg.local_max_workers))
 
-            miss_ok = []
+            miss_ok: List[tuple[int, List[float], List[bool], str]] = []
+
             for idx, alphas, msk, key in miss:
                 if sum(msk) < self.cfg.min_mask_size:
-                    energies[idx] = penalty * 10
-                    self.energy_cache.load(key, penalty, 0)
+                    result = CaseResult(
+                        idx=idx,
+                        energy=float("nan"),
+                        valid=0,
+                        orbital_penalty=0.0,
+                        total_loss=penalty * 10.0,
+                        mask_len=sum(msk),
+                        orbital_file=None,
+                        run_out_path="",
+                        cmocorr_log_path=None,
+                        failure_reason="mask_too_small",
+                    )
+                    losses[idx] = result.total_loss
+                    raw_energies[idx] = float("nan")
+                    self.energy_cache.load(key, result)
                 else:
                     miss_ok.append((idx, alphas, msk, key))
 
             if miss_ok:
+                futures = {}
                 with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                    futures = [
-                        ex.submit(
+                    for idx, alphas_i, mask_i, cache_key in miss_ok:
+                        fut = ex.submit(
                             _run_energy_case,
                             idx,
-                            alphas,
-                            msk,
+                            alphas_i,
+                            mask_i,
                             str(gen_dir),
                             python_bin,
-                            engine_cmd,
+                            molcas_cmd,
+                            self.cfg.molcas_root,
                             case,
+                            mask_lambda,
+                            self.cfg.cmocorr_enabled,
+                            self._resolved_cmocorr_ref_orb,
+                            self.cfg.cmocorr_orbital_candidates,
+                            self.cfg.cmocorr_t1,
+                            self.cfg.cmocorr_t2,
+                            self.cfg.cmocorr_lambda,
+                            self.cfg.cmocorr_fail_penalty,
                         )
-                        for (idx, alphas, msk, _) in miss_ok
-                    ]
-
-                    i2key = {idx: key for (idx, _, _, key) in miss_ok}
+                        futures[fut] = cache_key
 
                     for fut in as_completed(futures):
-                        idx, e = fut.result()
-                        energies[idx] = float(e)
+                        cache_key = futures[fut]
 
-                        valid = 1 if (isinstance(e, float) and math.isfinite(e)) else 0
-                        self.energy_cache.load(i2key[idx], float(e), valid)
+                        try:
+                            result: CaseResult = fut.result()
+                        except Exception as e:
+                            continue
+
+                        idx = result.idx
+                        losses[idx] = (
+                            float(result.total_loss)
+                            if math.isfinite(float(result.total_loss))
+                            else penalty
+                        )
+                        raw_energies[idx] = (
+                            float(result.energy)
+                            if math.isfinite(float(result.energy))
+                            else float("nan")
+                        )
+                        self.energy_cache.load(cache_key, result)
 
         out = [
-            penalty if (e is None or not math.isfinite(float(e))) else float(e)
-            for e in energies
+            penalty if (v is None or not math.isfinite(float(v))) else float(v)
+            for v in losses
         ]
+        out_energy = [
+            float("nan") if (v is None or not math.isfinite(float(v))) else float(v)
+            for v in raw_energies
+        ]
+
+        self._last_raw_energies = torch.tensor(
+            out_energy, dtype=torch.float32, device=population.device
+        )
+
         return torch.tensor(out, dtype=torch.float32, device=population.device)
 
     def lambda_from_error(
@@ -947,6 +1515,8 @@ class GA:
         patience_counter = 0
 
         curr_lambda = self.cfg.start_lambda
+        self._current_lambda = curr_lambda
+        self._resolve_cmocorr_reference(seed_alphas)
 
         lg("Starting GA...", self.cfg.log_level)
         handle = Path("metrics.csv")
@@ -960,8 +1530,10 @@ class GA:
             lg(f"Starting Gen: {gen}", self.cfg.log_level)
 
             self._gen_idx = gen
+            self._current_lambda = curr_lambda
             fit = self.fitness(pop, pop_mask, "pop")
-            fit_wmask = fit + curr_lambda * (pop_mask.sum(dim=1) / self.cfg.genome_size)
+            raw_energy_pop = self._last_raw_energies.clone()
+            fit_wmask = fit
 
             lg(
                 f"=======================\nFitness\n=======================\n{fit}\n=======================\n",
@@ -988,7 +1560,7 @@ class GA:
 
             lg(f"Minfit: {minfit}, Argmin: {argmin}", self.cfg.log_level)
 
-            min_energy = float(fit[argmin])
+            min_energy = float(raw_energy_pop[argmin])
 
             if minfit < best_fit:
                 best_fit = float(minfit)
@@ -1043,16 +1615,17 @@ class GA:
             lg(f"Generated {len(gen_part)}", self.cfg.log_level)
             lg(f"Generated {len(mask)}", self.cfg.log_level)
             lg("Caltulationg loss for generated population...", self.cfg.log_level)
+            self._current_lambda = curr_lambda
             gen_energy = self.fitness(gen_part, mask, "gen")
+            gen_raw_energy = self._last_raw_energies.clone()
 
             lg(
                 f"=======================\nGen E\n=======================\n{gen_energy}\n=======================\n",
                 self.cfg.log_level,
             )
 
-            reward = -gen_energy - curr_lambda * (
-                mask.sum(dim=1) / self.cfg.genome_size
-            )
+            reward = -gen_energy
+
             r_mean = reward.mean()
 
             if self.baseline is None:
@@ -1137,36 +1710,62 @@ if __name__ == "__main__":
     cfg = GA_cfg()
 
     seed = [
-        22628.599,
-        3372.3181,
-        760.35040,
-        211.74048,
-        67.223468,
-        23.372177,
-        8.7213730,
-        3.4680910,
-        1.4521440,
-        0.60861500,
-        0.25768600,
-        0.10417600,
-        0.04242700,
-        0.01484900,
-        0.001,
-        0.0001,
-        33.710184,
-        8.0576495,
-        2.8364714,
-        1.0999657,
-        0.44339640,
-        0.18222640,
-        0.07572410,
-        0.03168540,
-        0.01108990,
-        0.001,
-        1.4000000,
-        0.49000000,
-        0.17150000,
+        3691.66806090,
+        574.05640852,
+        124.00283202,
+        34.69632525,
+        11.53183174,
+        4.16574637,
+        1.51489133,
+        0.52752984,
+        0.17434522,
+        0.05729263,
+        0.01882728,
+        21.12969131,
+        8.89027185,
+        3.48780524,
+        1.28729033,
+        0.50437998,
+        0.22167796,
+        0.09053350,
+        0.73233854,
+        0.33641238,
+        0.14089237,
+        0.45925197,
+        0.19865529,
     ]
+
+    # seed = [
+    #     22628.599,
+    #     3372.3181,
+    #     760.35040,
+    #     211.74048,
+    #     67.223468,
+    #     23.372177,
+    #     8.7213730,
+    #     3.4680910,
+    #     1.4521440,
+    #     0.60861500,
+    #     0.25768600,
+    #     0.10417600,
+    #     0.04242700,
+    #     0.01484900,
+    #     0.001,
+    #     0.0001,
+    #     33.710184,
+    #     8.0576495,
+    #     2.8364714,
+    #     1.0999657,
+    #     0.44339640,
+    #     0.18222640,
+    #     0.07572410,
+    #     0.03168540,
+    #     0.01108990,
+    #     0.001,
+    #     1.4000000,
+    #     0.49000000,
+    #     0.17150000,
+    # ]
 
     # Calcium
     # seed = [
