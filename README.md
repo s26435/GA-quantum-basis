@@ -82,4 +82,7 @@
 * add option to not train population Generator during GA
 * mutation change may be better for low error training
 * add diffrent function to mask lambda scheduler
-* add scheduler to mutation sigma
+* cleaning up workspace
+* as a cmd app
+* as a python lib
+* rewrite on MPI (uhhh)
