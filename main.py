@@ -567,7 +567,7 @@ def run_cmocorr(
     fail_penalty: float,
 ) -> Tuple[float, Optional[Path], Optional[str]]:
     wd = Path(wd).resolve()
-    cmowd = (wd / "cmocorr").resolve()
+    cmowd = (wd / "molcas_work").resolve() #/ "cmocorr").resolve() # TODO
     cmowd.mkdir(parents=True, exist_ok=True)
 
     ref_orb = Path(ref_orb).resolve()
@@ -592,6 +592,10 @@ def run_cmocorr(
 
     shutil.copy2(ref_orb, cmoref)
     shutil.copy2(chk_orb, cmochk)
+
+    # copy_runfile_as_cmocorr(
+    #     cmowd=cmowd
+    # )
 
     inp.write_text(
         f"&CMOCORR\nDoOrbitals\nThresholds\n {t1} {t2}\n",
@@ -618,7 +622,23 @@ def run_cmocorr(
     env["MOLCAS_PROJECT"] = "NAME"
     env["MOLCAS_NPROCS"] = "1"
 
+    assert (cmowd / "CMOREF").exists(), f"Missing {cmowd / 'CMOREF'}"
+    assert (cmowd / "CMOCHK").exists(), f"Missing {cmowd / 'CMOCHK'}"
+
     with log.open("w", encoding="utf-8") as f:
+        proc = subprocess.run(
+            [molcas_cmd, "cmocorr.input"],
+            cwd=str(cmowd),
+            env=env,
+            stdout=f,
+            stderr=subprocess.STDOUT,
+        )
+    
+    with log.open("w", encoding="utf-8") as f:
+        f.write(f"[DEBUG] cwd={cmowd}\n")
+        f.write(f"[DEBUG] CMOREF exists={(cmowd / 'CMOREF').exists()}\n")
+        f.write(f"[DEBUG] CMOCHK exists={(cmowd / 'CMOCHK').exists()}\n")
+        f.write(f"[DEBUG] files={sorted(p.name for p in cmowd.iterdir())}\n\n")
         proc = subprocess.run(
             [molcas_cmd, "cmocorr.input"],
             cwd=str(cmowd),
@@ -658,6 +678,21 @@ def run_cmocorr(
     except Exception as e:
         return fail_penalty, log, f"parse_cmocorr json decode failed: {e!r}"
 
+
+def copy_runfile_as_cmocorr(
+    cmowd: Union[str, Path]
+) -> Path:
+    """
+    Copies an existing RunFile into cmowd as 'cmocorr.RunFile'.
+    """
+    cmowd = Path(cmowd).resolve()
+    cmowd.mkdir(parents=True, exist_ok=True)
+
+    dst = cmowd / "cmocorr.RunFile"
+    target = Path("../molcas_work/INPUT.RunFile")
+
+    shutil.copy2(target, dst)
+    return dst
 
 def _run_energy_case(
     i: int,
@@ -1125,8 +1160,122 @@ class GA:
         self.err_ema = None
         self.err_ema_beta = 0.9
 
+        self._cmocorr_refs_by_sig: dict[str, str] = {}
         self._resolved_cmocorr_ref_orb: Optional[str] = None
         self._last_raw_energies: Optional[torch.Tensor] = None
+
+    def _reference_file_for_len(self, mask_len: int) -> Path:
+        ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        return ref_dir / f"reference_len_{mask_len}.orb"
+
+    def _load_persisted_references(self):
+        ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
+        if not ref_dir.exists():
+            return
+
+        for p in ref_dir.glob("reference_len_*.orb"):
+            try:
+                mask_len = int(p.stem.split("_")[-1])
+            except ValueError:
+                continue
+            self._cmocorr_refs_by_len[mask_len] = str(p.resolve())
+
+    def _mask_signature(self, mask: Union[List[bool], torch.Tensor]) -> str:
+        """
+        Signature of sanitized mask.
+        Because sanitize_blocks packs active orbitals to the front of each block,
+        this signature uniquely determines active basis structure.
+        """
+        if isinstance(mask, torch.Tensor):
+            mask = (mask.detach().cpu() > 0.5).to(torch.uint8).tolist()
+
+        return "".join("1" if bool(x) else "0" for x in mask)
+
+    def _reference_file_for_signature(self, sig: str) -> Path:
+        ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        return ref_dir / f"reference_sig_{sig}.orb"
+
+    def _load_persisted_references(self):
+        ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
+        if not ref_dir.exists():
+            return
+
+        for p in ref_dir.glob("reference_sig_*.orb"):
+            name = p.stem  # reference_sig_101110...
+            sig = name[len("reference_sig_") :]
+            if sig:
+                self._cmocorr_refs_by_sig[sig] = str(p.resolve())
+
+    def _register_reference_for_signature(
+        self,
+        sig: str,
+        orbital_file: Union[str, Path],
+        overwrite: bool = False,
+    ):
+        src = Path(orbital_file).resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"Reference source orbital does not exist: {src}")
+
+        dst = self._reference_file_for_signature(sig)
+
+        if dst.exists() and not overwrite:
+            self._cmocorr_refs_by_sig[sig] = str(dst.resolve())
+            return
+
+        shutil.copy2(src, dst)
+        self._cmocorr_refs_by_sig[sig] = str(dst.resolve())
+
+    def _pick_reference_for_signature(self, sig: str) -> Optional[str]:
+        if not self.cfg.cmocorr_enabled:
+            return None
+        return self._cmocorr_refs_by_sig.get(sig)
+
+    def _register_reference_for_length(
+        self,
+        mask_len: int,
+        orbital_file: Union[str, Path],
+        overwrite: bool = False,
+    ):
+        src = Path(orbital_file).resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"Reference source orbital does not exist: {src}")
+
+        dst = self._reference_file_for_len(mask_len)
+
+        if dst.exists() and not overwrite:
+            self._cmocorr_refs_by_len[mask_len] = str(dst.resolve())
+            return
+
+        shutil.copy2(src, dst)
+        self._cmocorr_refs_by_len[mask_len] = str(dst.resolve())
+
+        lg(
+            f"Registered CMOCORR reference for mask_len={mask_len}: {dst}",
+            self.cfg.log_level,
+        )
+
+    def _pick_reference_for_length(self, mask_len: int) -> Optional[str]:
+        """
+        Exact match if available.
+        Otherwise pick the smallest known reference with length >= mask_len.
+        If none exists, fall back to the largest known reference.
+        """
+        if not self.cfg.cmocorr_enabled:
+            return None
+
+        if mask_len in self._cmocorr_refs_by_len:
+            return self._cmocorr_refs_by_len[mask_len]
+
+        if not self._cmocorr_refs_by_len:
+            return None
+
+        known = sorted(self._cmocorr_refs_by_len.keys())
+
+        longer_or_equal = [k for k in known if k >= mask_len]
+        chosen = longer_or_equal[0] if longer_or_equal else known[-1]
+        return self._cmocorr_refs_by_len[chosen]
 
     def _prepare_case_files(self, target_dir: Path):
         target_dir.mkdir(parents=True, exist_ok=True)
@@ -1141,17 +1290,38 @@ class GA:
 
     def _resolve_cmocorr_reference(self, seed_alphas: List[float]):
         if not self.cfg.cmocorr_enabled:
+            self._cmocorr_refs_by_sig = {}
             self._resolved_cmocorr_ref_orb = None
             return
+
+        self._load_persisted_references()
+
+        full_mask = [True] * len(seed_alphas)
+        seed_sig = self._mask_signature(full_mask)
 
         if self.cfg.cmocorr_ref_orb is not None:
             p = Path(self.cfg.cmocorr_ref_orb).expanduser().resolve()
             if not p.exists():
-                raise FileNotFoundError(
-                    f"CMOCORR reference orbital file not found: {p}"
-                )
+                raise FileNotFoundError(f"CMOCORR reference orbital file not found: {p}")
+
+            self._cmocorr_refs_by_sig[seed_sig] = str(p)
             self._resolved_cmocorr_ref_orb = str(p)
-            lg(f"Using external CMOCORR reference: {p}", self.cfg.log_level)
+
+            lg(
+                f"Using external CMOCORR reference for signature={seed_sig}: {p}",
+                self.cfg.log_level,
+            )
+            return
+
+        cached_ref = self._reference_file_for_signature(seed_sig)
+        if cached_ref.exists():
+            self._cmocorr_refs_by_sig[seed_sig] = str(cached_ref.resolve())
+            self._resolved_cmocorr_ref_orb = str(cached_ref.resolve())
+
+            lg(
+                f"Using cached bootstrap CMOCORR reference for signature={seed_sig}: {cached_ref}",
+                self.cfg.log_level,
+            )
             return
 
         if not self.cfg.cmocorr_bootstrap_from_seed:
@@ -1162,20 +1332,10 @@ class GA:
         ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
         self._prepare_case_files(ref_dir)
 
-        cached_ref = ref_dir / "reference.orb"
-        if cached_ref.exists():
-            self._resolved_cmocorr_ref_orb = str(cached_ref)
-            lg(
-                f"Using cached bootstrap CMOCORR reference: {cached_ref}",
-                self.cfg.log_level,
-            )
-            return
-
-        full_mask = [True] * len(seed_alphas)
         molcas_cmd = getattr(self.cfg, "molcas_cmd", self.cfg.molcas_dir)
 
         lg(
-            "Building bootstrap CMOCORR reference from original seed...",
+            f"Building bootstrap CMOCORR reference from original seed for signature={seed_sig}...",
             self.cfg.log_level,
         )
 
@@ -1198,7 +1358,7 @@ class GA:
             cmocorr_fail_penalty=self.cfg.cmocorr_fail_penalty,
         )
 
-        if result.valid != 1:
+        if result.valid != 1 or not math.isfinite(result.energy):
             raise RuntimeError(
                 "Bootstrap reference calculation failed:\n"
                 f"reason: {result.failure_reason}\n"
@@ -1207,29 +1367,23 @@ class GA:
             )
 
         if result.orbital_file is None:
-            ref_case_dir = ref_dir / "reference_case_0000"
-            files = []
-            if ref_case_dir.exists():
-                files = sorted(p.name for p in ref_case_dir.iterdir())
-
             raise RuntimeError(
                 "Bootstrap reference calculation finished, but no orbital file was found.\n"
                 f"run_out: {result.run_out_path}\n"
                 f"failure_reason: {result.failure_reason}\n"
-                f"files_in_reference_case: {files}\n"
             )
 
-        src = Path(result.orbital_file).resolve()
-        if not src.exists():
-            raise FileNotFoundError(
-                f"Reference orbital file not found after build: {src}"
-            )
+        self._register_reference_for_signature(
+            sig=seed_sig,
+            orbital_file=result.orbital_file,
+            overwrite=True,
+        )
 
-        shutil.copy2(src, cached_ref)
-        self._resolved_cmocorr_ref_orb = str(cached_ref.resolve())
+        self._resolved_cmocorr_ref_orb = self._cmocorr_refs_by_sig[seed_sig]
 
         lg(
-            f"Bootstrap CMOCORR reference created: {self._resolved_cmocorr_ref_orb}",
+            f"Bootstrap CMOCORR reference created for signature={seed_sig}: "
+            f"{self._resolved_cmocorr_ref_orb}",
             self.cfg.log_level,
         )
 
@@ -1239,7 +1393,11 @@ class GA:
         """
         Fitness function for population.
 
-        energy + lambda_mask * mask_len + lambda_cmocorr * orbital_penalty
+        total_loss = energy + lambda_mask * mask_len + lambda_cmocorr * orbital_penalty
+
+        CMOCORR reference is chosen by sanitized mask signature, not by mask length.
+        If a new valid individual with unseen signature appears, its orbital file
+        becomes the reference for that signature for future evaluations.
         """
 
         B = population.size(0)
@@ -1251,7 +1409,11 @@ class GA:
 
         alphas_all: List[List[float]] = []
         mask_all: List[List[bool]] = []
+        mask_lens: List[int] = []
+        signatures: List[str] = []
+        ref_paths: List[Optional[str]] = []
         keys: List[str] = []
+        cmocorr_enabled_flags: List[bool] = []
 
         mask_lambda = float(getattr(self, "_current_lambda", self.cfg.start_lambda))
 
@@ -1261,29 +1423,68 @@ class GA:
 
             a_s, m_s = sanitize_blocks(a, m_i, lo=1e-6, hi=1e5, min_ratio=1.2)
 
-            alphas_all.append(a_s.tolist())
-            mask_all.append([bool(x) for x in m_s.tolist()])
+            alphas_i = a_s.tolist()
+            mask_i = [bool(x) for x in m_s.tolist()]
+            mask_len_i = int(sum(mask_i))
+            sig_i = self._mask_signature(mask_i)
+
+            ref_path_i = self._pick_reference_for_signature(sig_i)
+
+            # CMOCORR only if we actually have a compatible reference for this signature
+            cmocorr_enabled_i = bool(
+                self.cfg.cmocorr_enabled and ref_path_i is not None
+            )
 
             key = hash_case_context(
                 alphas=a_s,
                 mask=m_s,
                 template_path=gen_dir / "INPUT.template",
-                ref_orb_path=self._resolved_cmocorr_ref_orb,
+                ref_orb_path=ref_path_i,
                 cmocorr_t1=self.cfg.cmocorr_t1,
                 cmocorr_t2=self.cfg.cmocorr_t2,
-                cmocorr_enabled=self.cfg.cmocorr_enabled,
+                cmocorr_enabled=cmocorr_enabled_i,
             )
-            keys.append(key)
 
-        losses: List[float | None] = [None] * B
-        raw_energies: List[float | None] = [None] * B
-        miss: List[tuple[int, List[float], List[bool], str]] = []
+            alphas_all.append(alphas_i)
+            mask_all.append(mask_i)
+            mask_lens.append(mask_len_i)
+            signatures.append(sig_i)
+            ref_paths.append(ref_path_i)
+            keys.append(key)
+            cmocorr_enabled_flags.append(cmocorr_enabled_i)
+
+        losses: List[Optional[float]] = [None] * B
+        raw_energies: List[Optional[float]] = [None] * B
+
+        miss: List[
+            Tuple[
+                int,  # idx
+                List[float],  # alphas
+                List[bool],  # mask
+                int,  # mask_len
+                str,  # signature
+                Optional[str],  # ref_path
+                bool,  # cmocorr_enabled_i
+                str,  # cache_key
+            ]
+        ] = []
 
         for i, key in enumerate(keys):
             hit = self.energy_cache.check(key)
 
             if hit is None:
-                miss.append((i, alphas_all[i], mask_all[i], key))
+                miss.append(
+                    (
+                        i,
+                        alphas_all[i],
+                        mask_all[i],
+                        mask_lens[i],
+                        signatures[i],
+                        ref_paths[i],
+                        cmocorr_enabled_flags[i],
+                        key,
+                    )
+                )
                 continue
 
             total_loss = float(hit["total_loss"])
@@ -1294,7 +1495,18 @@ class GA:
                 losses[i] = total_loss
                 raw_energies[i] = energy
             else:
-                miss.append((i, alphas_all[i], mask_all[i], key))
+                miss.append(
+                    (
+                        i,
+                        alphas_all[i],
+                        mask_all[i],
+                        mask_lens[i],
+                        signatures[i],
+                        ref_paths[i],
+                        cmocorr_enabled_flags[i],
+                        key,
+                    )
+                )
 
         penalty = 1e4
 
@@ -1303,9 +1515,29 @@ class GA:
             molcas_cmd = getattr(self.cfg, "molcas_cmd", self.cfg.molcas_dir)
             max_workers = max(1, int(self.cfg.local_max_workers))
 
-            miss_ok: List[tuple[int, List[float], List[bool], str]] = []
+            miss_ok: List[
+                Tuple[
+                    int,
+                    List[float],
+                    List[bool],
+                    int,
+                    str,
+                    Optional[str],
+                    bool,
+                    str,
+                ]
+            ] = []
 
-            for idx, alphas, msk, key in miss:
+            for (
+                idx,
+                alphas,
+                msk,
+                mask_len,
+                sig,
+                ref_path,
+                cmocorr_enabled_i,
+                key,
+            ) in miss:
                 if sum(msk) < self.cfg.min_mask_size:
                     result = CaseResult(
                         idx=idx,
@@ -1323,12 +1555,33 @@ class GA:
                     raw_energies[idx] = float("nan")
                     self.energy_cache.load(key, result)
                 else:
-                    miss_ok.append((idx, alphas, msk, key))
+                    miss_ok.append(
+                        (
+                            idx,
+                            alphas,
+                            msk,
+                            mask_len,
+                            sig,
+                            ref_path,
+                            cmocorr_enabled_i,
+                            key,
+                        )
+                    )
 
             if miss_ok:
                 futures = {}
+
                 with ProcessPoolExecutor(max_workers=max_workers) as ex:
-                    for idx, alphas_i, mask_i, cache_key in miss_ok:
+                    for (
+                        idx,
+                        alphas_i,
+                        mask_i,
+                        mask_len_i,
+                        sig_i,
+                        ref_path_i,
+                        cmocorr_enabled_i,
+                        cache_key,
+                    ) in miss_ok:
                         fut = ex.submit(
                             _run_energy_case,
                             idx,
@@ -1340,41 +1593,82 @@ class GA:
                             self.cfg.molcas_root,
                             case,
                             mask_lambda,
-                            self.cfg.cmocorr_enabled,
-                            self._resolved_cmocorr_ref_orb,
+                            cmocorr_enabled_i,  # <- per candidate
+                            ref_path_i,  # <- compatible ref or None
                             self.cfg.cmocorr_orbital_candidates,
                             self.cfg.cmocorr_t1,
                             self.cfg.cmocorr_t2,
                             self.cfg.cmocorr_lambda,
                             self.cfg.cmocorr_fail_penalty,
                         )
-                        futures[fut] = cache_key
+                        futures[fut] = (
+                            cache_key,
+                            sig_i,
+                            mask_len_i,
+                            cmocorr_enabled_i,
+                        )
 
                     for fut in as_completed(futures):
-                        cache_key = futures[fut]
+                        cache_key, sig_i, mask_len_i, cmocorr_enabled_i = futures[fut]
 
                         try:
                             result: CaseResult = fut.result()
                         except Exception as e:
+                            lg(
+                                f"Worker future crashed for signature={sig_i}: {e!r}",
+                                self.cfg.log_level,
+                            )
                             continue
 
                         idx = result.idx
+
                         losses[idx] = (
                             float(result.total_loss)
                             if math.isfinite(float(result.total_loss))
                             else penalty
                         )
+
                         raw_energies[idx] = (
                             float(result.energy)
                             if math.isfinite(float(result.energy))
                             else float("nan")
                         )
+
                         self.energy_cache.load(cache_key, result)
+
+                        # If this signature had no reference yet, first valid result becomes reference
+                        if (
+                            self.cfg.cmocorr_enabled
+                            and (
+                                not cmocorr_enabled_i
+                            )  # no ref existed before this run
+                            and result.valid == 1
+                            and math.isfinite(float(result.energy))
+                            and result.orbital_file is not None
+                            and sig_i not in self._cmocorr_refs_by_sig
+                        ):
+                            try:
+                                self._register_reference_for_signature(
+                                    sig=sig_i,
+                                    orbital_file=result.orbital_file,
+                                    overwrite=False,
+                                )
+                                lg(
+                                    f"Registered new CMOCORR reference for signature={sig_i} "
+                                    f"(mask_len={mask_len_i}) from {result.orbital_file}",
+                                    self.cfg.log_level,
+                                )
+                            except Exception as e:
+                                lg(
+                                    f"Failed to register CMOCORR reference for signature={sig_i}: {e!r}",
+                                    self.cfg.log_level,
+                                )
 
         out = [
             penalty if (v is None or not math.isfinite(float(v))) else float(v)
             for v in losses
         ]
+
         out_energy = [
             float("nan") if (v is None or not math.isfinite(float(v))) else float(v)
             for v in raw_energies
