@@ -11,6 +11,30 @@ import numpy as np
 
 @dataclass
 class CaseResult:
+    """
+    Dataclass for stroing result of calculations to make caching easier.
+
+    :ivar idx: 
+    :vartype idx: int
+    :ivar energy: calculated energy of given set of arguments
+    :vartype energy: float
+    :ivar valid: whether the set of inputs is valid and returns good energy (stored as int but takes values: 0 and 1)
+    :vartype valid: int 
+    :ivar orbital_penalty: penalty value from CMOCORR calculations
+    :vartype orbital_penalty: float 
+    :ivar total_loss: total loss value
+    :vartype total_loss: float
+    :ivar mask_len: number of True in mask (number of active exponents)
+    :vartype mask_len: int
+    :ivar orbital_file: path to orbital file
+    :vartype orbital_file: Optional[str]
+    :ivar run_out_path: path for output file of calculations
+    :vartype run_out_path: Optional[str]
+    :ivar cmocorr_log_file: path for CMOCORR output file
+    :vartype cmocorr_log_file: Optional[str]
+    :ivar failure_reason: why calculations failed (deafault = None)
+    :vartype failure_reason: Optional[str]
+    """
     idx: int
     energy: float
     valid: int
@@ -24,6 +48,12 @@ class CaseResult:
 
 
 class CacheDatabase:
+    """
+    Class for handling database for caching system.
+
+    :param db_path: path to .sqlite file
+    :type db_path: Union[str, Path]
+    """
     def __init__(self, db_path: Union[str, Path]):
         """
         Constructor for database for caching energy for coressponding alpha.
@@ -95,10 +125,8 @@ class CacheDatabase:
 
         :param key: hashed genome
         :type key: str
-        :param energy: value of energy
-        :type energy: float
-        :param valid: 1 if is valid 0 if not
-        :type valid: int
+        :param result: result of calculations
+        :type result: CaseResult
         """
         payload = {
             "idx": result.idx,
@@ -167,6 +195,14 @@ def hash_alphas(alphas: torch.Tensor, mask: torch.Tensor) -> str:
     return hashlib.blake2b(a.tobytes(order="C"), digest_size=16).hexdigest()
 
 def file_sha256(path: Union[str, Path]) -> str:
+    """
+    Hashing function for hashing files
+
+    :param path: path for target file
+    :type path: str | Path
+    :return: value of hash
+    :rtype: str
+    """
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
@@ -182,6 +218,27 @@ def hash_case_context(
     cmocorr_t2: float,
     cmocorr_enabled: bool,
 ) -> str:
+    """
+    Hashes all calculations results for one calculation
+
+    :param alphas: tensor of exponents, dtype=float
+    :type alphas: torch.Tensor
+    :param mask: tensor of mask
+    :type mask: torch.Tensor
+    :param template_path: template file path
+    :type template_path: str|Path
+    :param ref_orb_path: reference orbital file path
+    :type ref_orb_path: str|Path
+    :param cmocorr_t1: lower threshold for CMOCORR calc
+    :type cmocorr_t1: float
+    :param cmocorr_t2: upper threshold for CMOCORR calc
+    :type cmocorr_t2: float
+    :param cmocorr_enabled: whether CMOCORR calculations are enebled for this run
+    :type cmocorr_enabled: bool
+    :return: value of hash
+    :rtype: str
+    """
+
     base = hash_alphas(alphas, mask)
     h = hashlib.blake2b(digest_size=16)
     h.update(base.encode("utf-8"))

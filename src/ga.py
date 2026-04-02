@@ -19,9 +19,16 @@ import torch
 
 
 class GA:
+    """
+    Genetic Algorithm object 
+
+    :param config: configuration object
+    :type config: GA_cfg
+    """
+
     def __init__(self, config: GA_cfg):
         """
-        Constructor for genetic algorithm object
+        Constructor for GA
 
         :param config: configuration object
         :type config: GA_cfg

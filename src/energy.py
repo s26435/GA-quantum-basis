@@ -20,12 +20,45 @@ def run_energy_case(
     mask_lambda: float,
     cmocorr_enabled: bool,
     cmocorr_ref_orb: Optional[str],
-    cmocorr_orbital_candidates: Tuple[str, ...],
+    cmocorr_orbital_candidates: Tuple[str, ...], # TODO remove unused
     cmocorr_t1: float,
     cmocorr_t2: float,
     cmocorr_lambda: float,
     cmocorr_fail_penalty: float,
 ) -> CaseResult:
+    """
+    Runs molcas calculations for one case.
+
+    :param i: number of case in population
+    :type i: int
+    :param alphas: list of exponents
+    :type alphas: List[float]
+    :param mask: mask
+    :type mask: List[bool]
+    :param gen_dir_str: genome directory path
+    :type gen_dir_path: str
+    :param molcas_cmd: command for running molcas
+    :type molcas_cmd: str
+    :param molcas_root: molcas root directory path
+    :type molcas_root: str
+    :param python_bin: pyhton binary path 
+    :type python_bin: str
+    :param case: name of case ("gen"/"pop")
+    :type case: str
+    :param mask_lambda: multiplayer for penalty of mask part of loss
+    :type mask_lambda: float
+    :param cmocorr_enabled: whether CMOCORR calculations are enebled for this run
+    :type cmocorr_enabled: bool
+    :param cmocorr_t1: lower threshold for CMOCORR calc
+    :type cmocorr_t1: float
+    :param cmocorr_t2: upper threshold for CMOCORR calc
+    :type cmocorr_t2: float
+    :param cmocorr_lambda: multiplayer for penalty of CMOCORR loss
+    :type cmocorr_lambda: float
+    :param cmocorr_fail_penalty: penalty for failing CMOCORR calculations
+    :type cmocorr_fail_penalty: float 
+    """
+
     gen_dir = Path(gen_dir_str).resolve()
     wd = (gen_dir / f"{case}_case_{i:04d}").resolve()
     wd.mkdir(parents=True, exist_ok=True)
@@ -110,7 +143,6 @@ def run_energy_case(
         env["MOLCAS_PROJECT"] = "NAME"
         env["MOLCAS_NPROCS"] = "1"
 
-        # jeden open("w"), bez kasowania własnego debugu
         with run_out.open("w", encoding="utf-8") as f:
             f.write(f"[DEBUG] molcas_cmd={molcas_cmd}\n")
             f.write(f"[DEBUG] molcas_root={molcas_root}\n")

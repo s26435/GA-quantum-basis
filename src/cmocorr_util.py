@@ -6,14 +6,6 @@ import shutil
 import os
 import json
 
-
-def find_candidate_orbital_file(wd: Path) -> Optional[Path]:
-    p = (wd / "INPUT.RasOrb").resolve()
-    if p.exists() and p.is_file():
-        return p
-    return None
-
-
 def run_cmocorr(
     wd: Path,
     molcas_cmd: str,
@@ -25,6 +17,31 @@ def run_cmocorr(
     t2: float,
     fail_penalty: float,
 ) -> Tuple[float, Optional[Path], Optional[str]]:
+    """
+    Runs CMOCORR calculations
+
+    :param wd: absolute path for working directory
+    :type wd: Path
+    :param molcas_cmd: command for running molcas
+    :type molcas_cmd: str
+    :param molcas_root: molcas root directory path
+    :type molcas_root: str
+    :param python_bin: pyhton binary path 
+    :type python_bin: str
+    :param ref_orb: reference orbital file path
+    :type ref_orb: str|Path
+    :param chk_orb: check orbital file path
+    :type chk_orb: str|Path
+    :param t1: lower threshold
+    :type t1: float
+    :param t2: higher threshold
+    :type t2: float
+    :param fail_penalty: value of penalty for fail
+    :type fail_penalty: float
+    :return: tuple of loss value, log file path, error info
+    :rtype: Tuple[float, Path|None, str|None]:
+    """
+
     wd = Path(wd).resolve()
     cmowd = (wd / "molcas_work").resolve()  # / "cmocorr").resolve() # TODO
     cmowd.mkdir(parents=True, exist_ok=True)
@@ -135,7 +152,12 @@ def run_cmocorr(
 
 def copy_runfile_as_cmocorr(cmowd: Union[str, Path]) -> Path:
     """
-    Copies an existing RunFile into cmowd as 'cmocorr.RunFile'.
+    Copies an existing RunFile into cmowd as 'cmocorr.RunFile'
+
+    :param cmowd: CMOCORR working directory
+    :type cmowd: str|Path
+    :return: copied file path
+    :rtype: Path
     """
     cmowd = Path(cmowd).resolve()
     cmowd.mkdir(parents=True, exist_ok=True)
