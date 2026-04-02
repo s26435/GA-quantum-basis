@@ -20,7 +20,7 @@ import torch
 
 class GA:
     """
-    Genetic Algorithm object 
+    Genetic Algorithm object
 
     :param config: configuration object
     :type config: GA_cfg
@@ -96,16 +96,15 @@ class GA:
         self._resolved_cmocorr_ref_orb: Optional[str] = None
         self._last_raw_energies: Optional[torch.Tensor] = None
 
-    def _reference_file_for_len(self, mask_len: int) -> Path:
-        ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
-        ref_dir.mkdir(parents=True, exist_ok=True)
-        return ref_dir / f"reference_len_{mask_len}.orb"
-
     def _mask_signature(self, mask: Union[List[bool], torch.Tensor]) -> str:
         """
-        Signature of sanitized mask.
-        Because sanitize_blocks packs active orbitals to the front of each block,
+        Signature of sanitized mask. Because sanitize_blocks packs active orbitals to the front of each block,
         this signature uniquely determines active basis structure.
+
+        :param mask: target mask
+        :type mask: List[bool] | torch.Tensor
+        :return: mask signature
+        :rtype: str
         """
         if isinstance(mask, torch.Tensor):
             mask = (mask.detach().cpu() > 0.5).to(torch.uint8).tolist()
