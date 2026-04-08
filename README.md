@@ -19,7 +19,6 @@ This project implements a hybrid genetic algorithm combined with a neural networ
 ```
 ├── main.py                  # Entry point - run with `python3 main.py`
 ├── requirements.txt         # Python dependencies
-├── setup.sh                # Environment setup
 ├── cleanup.sh              # Clean up all generated files
 │
 ├── src/
