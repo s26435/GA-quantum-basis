@@ -9,6 +9,36 @@ RE_SMALL_OVERLAP = re.compile(r"small overlap", re.IGNORECASE)
 RE_OVERLAP = re.compile(r"overlap[^0-9\-+]*([0-9]*\.[0-9]+)", re.IGNORECASE)
 
 def parse_cmocorr_text(text: str, t1: float) -> dict:
+    """
+    Parse CMOCORR output and compute a penalty based on the lower overlap threshold.
+
+    :param text: Content of the CMOCORR output file.
+    :type text: str
+    :param t1: Lower boundary used to calculate the penalty.
+    :type t1: float
+    :return: Dictionary containing:
+    
+             - ``ok`` (bool): Whether the calculation was successful.
+             - ``warning_count`` (int): Number of warnings found in the output.
+             - ``min_overlap`` (float | None): Minimal overlap value found.
+             - ``penalty`` (float): Calculated penalty value.
+    :rtype: dict
+
+    **Example:**
+
+    .. code-block:: python
+
+        result = parse_cmocorr_text(file_content, 0.9)
+        print(result)
+
+        {
+            "ok": True,
+            "warning_count": 3,
+            "min_overlap": 0.4,
+            "penalty": 1.3,
+        }
+    """
+
     warning_count = len(RE_SMALL_OVERLAP.findall(text))
     overlaps = []
 

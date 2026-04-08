@@ -5,6 +5,10 @@ import ast
 from matplotlib import pyplot as plt
 
 
+"""
+Compares orginal basis set with best in population
+"""
+
 def load_populations_csv(path, device="cpu"):
     path = Path(path)
     out = []

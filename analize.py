@@ -1,8 +1,12 @@
 import pandas as pd 
 from matplotlib import pyplot as plt
 import numpy as np
-
 from pathlib import Path
+
+"""
+Generates plots for training
+"""
+
 dir = "" # "runs/run13/" 
 dir_anal = dir + "analyze/"
 Path(dir_anal).mkdir(exist_ok=True)

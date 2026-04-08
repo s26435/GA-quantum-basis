@@ -21,11 +21,14 @@ def lg(text: str, log_level: int = 1):
             file.write(msg + "\n")
 
 
-def random_variation_ordered(seq):
+def random_variation_ordered(seq: List[float]) -> List[float]:
     """
     Generates ordered ranomized variation of given seqence
 
     :param seq: template sequence
+    :type seq: List[float]
+    :return: variation of sorted seq
+    :rtype: List[float]
     """
     seq = list(seq)
     n = len(seq)
