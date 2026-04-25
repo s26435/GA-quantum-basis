@@ -6,7 +6,7 @@ from .globals import BLOCKS, DEFAULT_WORK_ROOT, DEFAULT_REFERENCE_DIR
 @dataclass(frozen=True)
 class GA_cfg:
     # true value of energy - used in early stopping, may be None
-    ground_truth: Optional[float] = -14.668
+    ground_truth: Optional[float] = -677.5
 
     # GA
     population_size: int = 30
@@ -44,7 +44,7 @@ class GA_cfg:
     # generator training
     lr: float = 1e-3
     weight_decay: float = 1e-4
-    local_max_workers: int = 4
+    local_max_workers: int = 10
 
     # directories
     work_root: str = str(

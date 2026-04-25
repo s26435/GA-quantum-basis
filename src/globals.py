@@ -10,7 +10,7 @@ BASE_DIR = Path("/home/tezriem/Documents/GA-quantum-basis/") # Path(__file__).re
 DEFAULT_WORK_ROOT = (BASE_DIR / "workspace").resolve()
 DEFAULT_REFERENCE_DIR = (DEFAULT_WORK_ROOT / "reference").resolve()
 
-BLOCKS = [11, 7, 3, 2]
+# BLOCKS = [11, 7, 3, 2]
 # BLOCKS = [14, 9, 4, 2]  # Be
-# BLOCKS = [20, 16, 6, 4]  # Ca
+BLOCKS = [20, 16, 6, 4, 2]  # Ca
 

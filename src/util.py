@@ -77,8 +77,9 @@ def make_initial_population_from_seed(
     assert len(seed_alphas) == sum(BLOCKS), f"{len(seed_alphas)} is not {sum(BLOCKS)}"
 
     pop = []
+    pop.append(seed_alphas)
     off = 0
-    for _ in range(pop_size):
+    for _ in range(pop_size - 1):
         indiv = []
         off = 0
         for b in BLOCKS:

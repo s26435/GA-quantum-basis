@@ -151,11 +151,13 @@ class GA:
             return None
         return self._cmocorr_refs_by_sig.get(sig)
 
-    def _prepare_case_files(self, target_dir: Path):
+    def _prepare_case_files(self, target_dir: Path, use_cmocorr_input: bool = False):
         target_dir.mkdir(parents=True, exist_ok=True)
         base = Path(__file__).resolve().parent
 
-        shutil.copy2(base / "INPUT", target_dir / "INPUT.template")
+        input_file = "INPUT_CMOCORR" if use_cmocorr_input else "INPUT"
+        input_src = base.parent / input_file
+        shutil.copy2(input_src, target_dir / "INPUT.template")
         shutil.copy2(base / "build_input.py", target_dir / "build_input.py")
         shutil.copy2(base / "parse_energy.py", target_dir / "parse_energy.py")
 
@@ -206,7 +208,7 @@ class GA:
             )
 
         ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
-        self._prepare_case_files(ref_dir)
+        self._prepare_case_files(ref_dir, use_cmocorr_input=True)
 
         molcas_cmd = getattr(self.cfg, "molcas_cmd", self.cfg.molcas_dir)
 
@@ -305,7 +307,6 @@ class GA:
 
             ref_path_i = self._pick_reference_for_signature(sig_i)
 
-            # CMOCORR only if we actually have a compatible reference for this signature
             cmocorr_enabled_i = bool(
                 self.cfg.cmocorr_enabled and ref_path_i is not None
             )
@@ -468,8 +469,8 @@ class GA:
                             self.cfg.molcas_root,
                             case,
                             mask_lambda,
-                            cmocorr_enabled_i,  # <- per candidate
-                            ref_path_i,  # <- compatible ref or None
+                            cmocorr_enabled_i,
+                            ref_path_i,
                             self.cfg.cmocorr_orbital_candidates,
                             self.cfg.cmocorr_t1,
                             self.cfg.cmocorr_t2,
@@ -510,13 +511,11 @@ class GA:
                         )
 
                         self.energy_cache.load(cache_key, result)
-
-                        # If this signature had no reference yet, first valid result becomes reference
                         if (
                             self.cfg.cmocorr_enabled
                             and (
                                 not cmocorr_enabled_i
-                            )  # no ref existed before this run
+                            )
                             and result.valid == 1
                             and math.isfinite(float(result.energy))
                             and result.orbital_file is not None
@@ -700,7 +699,9 @@ class GA:
 
             self._gen_idx = gen
             self._current_lambda = curr_lambda
+            lg("Starting calculationg fitness...", self.cfg.log_level)
             fit = self.fitness(pop, pop_mask, "pop")
+            lg("Fitness calculated...", self.cfg.log_level)
             raw_energy_pop = self._last_raw_energies.clone()
             fit_wmask = fit
 
@@ -789,7 +790,7 @@ class GA:
             lg("Caltulationg loss for generated population...", self.cfg.log_level)
             self._current_lambda = curr_lambda
             gen_energy = self.fitness(gen_part, mask, "gen")
-            gen_raw_energy = self._last_raw_energies.clone()
+            _ = self._last_raw_energies.clone()
 
             lg(
                 f"=======================\nGen E\n=======================\n{gen_energy}\n=======================\n",
