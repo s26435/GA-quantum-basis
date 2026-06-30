@@ -6,6 +6,8 @@ import shutil
 import os
 import json
 
+from src.util import lg
+
 def run_cmocorr(
     wd: Path,
     molcas_cmd: str,
@@ -146,6 +148,7 @@ def run_cmocorr(
     try:
         data = json.loads(p.stdout)
         penalty = float(data.get("penalty", fail_penalty))
+        lg(f"Cmocor penalty for {wd}: {penalty}", 1)
         return penalty, log, None
     except Exception as e:
         return fail_penalty, log, f"parse_cmocorr json decode failed: {e!r}"

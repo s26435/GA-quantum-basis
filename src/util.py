@@ -5,6 +5,9 @@ from .globals import log_handle, BLOCKS
 import torch
 import random
 
+from pathlib import Path
+import shutil
+
 def lg(text: str, log_level: int = 1):
     """
     Logs *text* into stdout and into out.log file.
@@ -19,6 +22,23 @@ def lg(text: str, log_level: int = 1):
         print(msg)
         with open(log_handle, "a") as file:
             file.write(msg + "\n")
+
+
+def clear_molcas_work(gen_idx: int, work_root: str | Path = "workspace"):
+    work_root = Path(work_root).resolve()
+    gen_dir = work_root / f"gen_{gen_idx:04d}"
+
+    if not gen_dir.exists():
+        raise FileNotFoundError(f"Generation directory does not exist: {gen_dir}")
+
+    molcas_dirs = list(gen_dir.glob("*/molcas_work"))
+
+    for molcas_work in molcas_dirs:
+        if not molcas_work.is_dir():
+            continue
+
+        lg(f"removing directory: {molcas_work}")
+        shutil.rmtree(molcas_work)
 
 
 def random_variation_ordered(seq: List[float]) -> List[float]:

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import csv
 
-from src.util import lg, make_initial_population_from_seed, sanitize_blocks
+from src.util import lg, make_initial_population_from_seed, sanitize_blocks, clear_molcas_work
 from src.globals import population_handle, BLOCKS
 from src.cache import CaseResult, CacheDatabase, hash_case_context
 from src.config import GA_cfg
@@ -208,7 +208,7 @@ class GA:
             )
 
         ref_dir = Path(self.cfg.cmocorr_reference_dir).resolve()
-        self._prepare_case_files(ref_dir, use_cmocorr_input=True)
+        self._prepare_case_files(ref_dir, use_cmocorr_input=False)
 
         molcas_cmd = getattr(self.cfg, "molcas_cmd", self.cfg.molcas_dir)
 
@@ -298,7 +298,7 @@ class GA:
             a = torch.exp(pop_cpu[i])
             m_i = (mask_cpu[i] > 0.5).float()
 
-            a_s, m_s = sanitize_blocks(a, m_i, lo=1e-6, hi=1e5, min_ratio=1.2)
+            a_s, m_s = sanitize_blocks(a, m_i, lo=1e-6, hi=1e12, min_ratio=1.2)
 
             alphas_i = a_s.tolist()
             mask_i = [bool(x) for x in m_s.tolist()]
@@ -866,6 +866,13 @@ class GA:
 
             if patience_counter >= self.cfg.early_stopping_patience:
                 break
+            
+            total, used, free = shutil.disk_usage("/")
+            
+            clear_molcas_work(gen)
+            if free <= 150 * 1024**3:
+                raise RuntimeExeption("No empty space left on device")
+
 
         torch.save(
             {

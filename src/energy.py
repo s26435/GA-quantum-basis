@@ -142,6 +142,8 @@ def run_energy_case(
         env["MOLCAS_OUTPUT"] = "WORKDIR"
         env["MOLCAS_PROJECT"] = "NAME"
         env["MOLCAS_NPROCS"] = "1"
+        env["MOLCAS_MEM"] = "4096"
+        env["MOLCAS_MAXMEM"] = "4096"
 
         with run_out.open("w", encoding="utf-8") as f:
             f.write(f"[DEBUG] molcas_cmd={molcas_cmd}\n")
@@ -208,6 +210,8 @@ def run_energy_case(
             wd / f"{project}.RasOrb",
             molcas_workdir / "RASORB",
             wd / "RASORB",
+            wd / f"{project}.ScfOrb",
+            molcas_workdir / f"{project}.ScfOrb"
         ]
 
         orb = None
