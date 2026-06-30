@@ -19,7 +19,7 @@ class GA_cfg:
     # mask weight multiplier
     start_lambda: float = 5e-4 
 
-    # ga auto stops whrn error is lower
+    # ga auto stops when error is lower
     error_threshold_early_stopping: float = 0.0001
     early_stopping_patience: int = 75
 
@@ -65,7 +65,7 @@ class GA_cfg:
     cmocorr_orbital_candidates: Tuple[str, ...] = ("RASORB",)
     cmocorr_t1: float = 0.90
     cmocorr_t2: float = 0.95
-    cmocorr_lambda: float = 10.0
+    cmocorr_lambda: float = 1.0
     cmocorr_fail_penalty: float = 1e4
 
     # logging

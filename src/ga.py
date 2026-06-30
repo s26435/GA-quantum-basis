@@ -871,7 +871,7 @@ class GA:
             
             clear_molcas_work(gen)
             if free <= 150 * 1024**3:
-                raise RuntimeExeption("No empty space left on device")
+                raise RuntimeError("No empty space left on device")
 
 
         torch.save(
