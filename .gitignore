@@ -8,6 +8,7 @@ starting_point.txt
 *.k
 *.ca
 *.be
+*.zip
 estymator.py
 venv/
 analyze/
@@ -16,3 +17,4 @@ tmp.txt
 licenses/
 workspace/
 src/__pycache__/
+workspace*/
