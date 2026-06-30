@@ -55,6 +55,8 @@ class GA:
                 f"Number of generated genomes must be greater then 0 but is {self.n_gen}"
             )
 
+        self.current_sigma = self.cfg.mutation_sigma
+
         self.n_offspring = max(0, self.cfg.population_size - self.n_elite - self.n_gen)
 
         self.generator = PopGenerator(
@@ -126,6 +128,9 @@ class GA:
             sig = name[len("reference_sig_") :]
             if sig:
                 self._cmocorr_refs_by_sig[sig] = str(p.resolve())
+
+    def _update_mutation_sigma(self, generation):
+        self.current_sigma = self.cfg.mutation_sigma * (1 - (math.log(1+generation))/(math.log(1+self.cfg.generations)))
 
     def _register_reference_for_signature(
         self,
@@ -648,7 +653,7 @@ class GA:
             do_mut = (torch.rand(B, 1, device=x.device) < self.cfg.mutation_p).float()
             noise = torch.randn_like(x) * self.cfg.mutation_sigma
             x = x + do_mut * noise
-
+        m = (m > 0.5).float()
         if self.cfg.mask_flip_p > 0:
             flip = (torch.rand_like(m) < self.cfg.mask_flip_p).float()
             m = (m > 0.5).float()
@@ -789,6 +794,8 @@ class GA:
             lg(f"Generated {len(mask)}", self.cfg.log_level)
             lg("Caltulationg loss for generated population...", self.cfg.log_level)
             self._current_lambda = curr_lambda
+            if self.cfg.mask_flip_p <= 0:
+                mask = torch.ones_like(mask)
             gen_energy = self.fitness(gen_part, mask, "gen")
             _ = self._last_raw_energies.clone()
 
@@ -846,7 +853,9 @@ class GA:
 
             pop = torch.cat([next_base, gen_part], dim=0)
             pop_mask = torch.cat([next_base_mask, mask], dim=0)
+             
 
+            self._update_mutation_sigma(gen)
             if err < best_err_seen - 1e-8:
                 best_err_seen = err
                 patience_counter = 0

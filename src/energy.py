@@ -204,10 +204,10 @@ def run_energy_case(
         project = "INPUT"
 
         orb_candidates = [
-            molcas_workdir / f"{project}.RasOrb.1",
             molcas_workdir / f"{project}.RasOrb",
-            wd / f"{project}.RasOrb.1",
+            molcas_workdir / f"{project}.RasOrb.1", 
             wd / f"{project}.RasOrb",
+            wd / f"{project}.RasOrb.1",
             molcas_workdir / "RASORB",
             wd / "RASORB",
             wd / f"{project}.ScfOrb",

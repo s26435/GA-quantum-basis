@@ -6,11 +6,11 @@ from .globals import BLOCKS, DEFAULT_WORK_ROOT, DEFAULT_REFERENCE_DIR
 @dataclass(frozen=True)
 class GA_cfg:
     # true value of energy - used in early stopping, may be None
-    ground_truth: Optional[float] = -26448.51 # -2428.25 # 289.781 Si #Ru -4528.2681 # Th -26448.51 #Cs -7783.78375
+    ground_truth: Optional[float] = -290.781 # -26448.51 # -2428.25 # 289.781 Si #Ru -4528.2681 # Th -26448.51 #Cs -7783.78375
     # GA
     population_size: int = 30
     device: str = "cpu"
-    generations: int = 1000
+    generations: int = 100
     genome_size: int = sum(BLOCKS)
 
     # when mask will be smaller then that algorithm will give it penalty
@@ -20,8 +20,8 @@ class GA_cfg:
     start_lambda: float = 5e-4 
 
     # ga auto stops when error is lower
-    error_threshold_early_stopping: float = 0.0001
-    early_stopping_patience: int = 75
+    error_threshold_early_stopping: float = 1e-6 
+    early_stopping_patience: int = 30
 
     # GA FUNCTIONS
     elite_frac: float = 0.2
@@ -30,9 +30,9 @@ class GA_cfg:
     # exponent mutation probability
     mutation_p: float = 0.4
     # strenght of mutation
-    mutation_sigma: float = 0.6
+    mutation_sigma: float = 3
     # mask mutation probability
-    mask_flip_p: float = 0.01
+    mask_flip_p: float = 0 #.01
 
     # GENERATOR PARAMETERS
     # latent space size
