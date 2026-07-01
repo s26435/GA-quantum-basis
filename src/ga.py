@@ -862,18 +862,14 @@ class GA:
             else:
                 patience_counter += 1
 
-            if err <= self.cfg.error_threshold_early_stopping:
-                break
-
             if patience_counter >= self.cfg.early_stopping_patience:
+                lg(f"Calculation stopped becouse patiente was hit: {self.cfg.early_stopping_patience}", self.cfg.log_level)
                 break
 
             if (self.cfg.ground_truth is not None) and (
                 abs(err) <= self.cfg.error_threshold_early_stopping
             ):
-                break
-
-            if patience_counter >= self.cfg.early_stopping_patience:
+                lg(f"Calculation stopped becouse error {abs(err)} < {self.cfg.error_threshold_early_stopping}", self.cfg.log_level)
                 break
             
             total, used, free = shutil.disk_usage("/")
