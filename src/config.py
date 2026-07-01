@@ -85,7 +85,7 @@ class GA_cfg:
 
 def save_config(config: GA_cfg, path: str | Path):
     with open(path, "w") as f:
-        f.write(asdict(config), encoding="utf-8")
+        f.write(asdict(config))
 
 def load_config(path: str | Path) -> GA_cfg:
     with open(path, "r") as f:
