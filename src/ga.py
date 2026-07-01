@@ -476,7 +476,6 @@ class GA:
                             mask_lambda,
                             cmocorr_enabled_i,
                             ref_path_i,
-                            self.cfg.cmocorr_orbital_candidates,
                             self.cfg.cmocorr_t1,
                             self.cfg.cmocorr_t2,
                             self.cfg.cmocorr_lambda,
