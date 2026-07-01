@@ -51,8 +51,8 @@ class GA_cfg:
     )  # "/home/tezriem/Documents/GA-quantum-basis/workspace"
     python_bin: str = "/home/jwolski/GA-quantum-basis/.venv/bin/python"
     molcas_cmd: str = "molcas"
-    molcas_root: str = "/home/mkros/8.6.NEW.Valera.Valence.gradient/"
-    molcas_dir: str = "/home/mkros/8.6.NEW.Valera.Valence.gradient/"
+    molcas_root: str = "/home/jwolski/8.6.NEW.Valera.Valence.gradient.cmocorr/"
+    molcas_dir: str = "/home/jwolski/8.6.NEW.Valera.Valence.gradient.cmocorr/"
     # CMOCORR
     cmocorr_enabled: bool = True
     cmocorr_ref_orb: Optional[str] = None
@@ -65,7 +65,7 @@ class GA_cfg:
     cmocorr_orbital_candidates: Tuple[str, ...] = ("RASORB",)
     cmocorr_t1: float = 0.90
     cmocorr_t2: float = 0.95
-    cmocorr_lambda: float = 1.0
+    cmocorr_lambda: float = 1e-3
     cmocorr_fail_penalty: float = 1e4
 
     # logging

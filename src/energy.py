@@ -219,7 +219,6 @@ def run_energy_case(
             if p.exists() and p.is_file():
                 orb = p.resolve()
                 break
-
         if orb is not None and orb.parent != wd:
             target = wd / orb.name
             shutil.copy2(orb, target)
