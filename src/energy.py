@@ -212,7 +212,7 @@ def run_energy_case(
                 orbital_file=None,
                 run_out_path=str(run_out),
                 cmocorr_log_path=None,
-                failure_reason="molcas_timeout_after_3600s",
+                failure_reason=f"molcas_timeout_after_{time_out}s",
             )
 
         class PseudoCompletedProcess:
