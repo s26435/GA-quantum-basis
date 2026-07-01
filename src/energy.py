@@ -7,6 +7,39 @@ import subprocess
 import os
 import shutil
 import traceback
+import signal
+
+def run_command_with_timeout(
+    cmd: list[str],
+    cwd: str,
+    timeout_s: int = 3600,
+    kill_after_s: int = 30,
+    env: dict | None = None,
+) -> tuple[int, str, bool]:
+    proc = subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        env=env,
+        start_new_session=True,
+    )
+
+    try:
+        out, _ = proc.communicate(timeout=timeout_s)
+        return proc.returncode, out, False
+
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            out, _ = proc.communicate(timeout=kill_after_s)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            out, _ = proc.communicate()
+
+        return 124, out, True
+
 
 def run_energy_case(
     i: int,
@@ -20,11 +53,11 @@ def run_energy_case(
     mask_lambda: float,
     cmocorr_enabled: bool,
     cmocorr_ref_orb: Optional[str],
-    cmocorr_orbital_candidates: Tuple[str, ...], # TODO remove unused
     cmocorr_t1: float,
     cmocorr_t2: float,
     cmocorr_lambda: float,
     cmocorr_fail_penalty: float,
+    time_out: int = 3600
 ) -> CaseResult:
     """
     Runs molcas calculations for one case.
@@ -151,13 +184,43 @@ def run_energy_case(
             f.write(f"[DEBUG] cwd={wd}\n")
             f.write(f"[DEBUG] workdir={molcas_workdir}\n\n")
 
-            p3 = subprocess.run(
-                [molcas_cmd, "INPUT"],
-                cwd=str(wd),
-                env=env,
-                stdout=f,
-                stderr=subprocess.STDOUT,
+        rc, output, timed_out = run_command_with_timeout(
+            cmd=[molcas_cmd, "INPUT"],
+            cwd=str(wd),
+            env=env,
+            timeout_s=time_out
+        )
+
+        with run_out.open("a", encoding="utf-8", errors="replace") as f:
+            f.write(output)
+
+        if timed_out:
+            energy_txt.write_text("nan\n", encoding="utf-8")
+
+            with run_out.open("a", encoding="utf-8") as f:
+                f.write("\n[molcas TIMEOUT]\n")
+                f.write("Killed after 3600 seconds\n")
+                f.write(f"[molcas_workdir] {molcas_workdir}\n")
+
+            return CaseResult(
+                idx=i,
+                energy=float("nan"),
+                valid=0,
+                orbital_penalty=cmocorr_fail_penalty if cmocorr_enabled else 0.0,
+                total_loss=1e4,
+                mask_len=mask_len,
+                orbital_file=None,
+                run_out_path=str(run_out),
+                cmocorr_log_path=None,
+                failure_reason="molcas_timeout_after_3600s",
             )
+
+        class PseudoCompletedProcess:
+            def __init__(self, returncode: int):
+                self.returncode = returncode
+
+        p3 = PseudoCompletedProcess(rc)
+            
 
         if p3.returncode != 0:
             energy_txt.write_text("nan\n", encoding="utf-8")
@@ -223,13 +286,6 @@ def run_energy_case(
             target = wd / orb.name
             shutil.copy2(orb, target)
             orb = target.resolve()
-
-        text = orb.read_text(encoding="utf-8")
-        idx = 10
-        text = text[:idx] + "1" + text[idx + 1:]
-        orb.write_text(text, encoding="utf-8")
-
-        orbital_file = str(orb) if orb else None
 
         if cmocorr_enabled:
             if not cmocorr_ref_orb:

@@ -81,6 +81,8 @@ class GA_cfg:
     model_load_path: str = "model_be.ckpt"  #  ca = "model_ca.ckpt"
     model_save_path: str = "model_be.ckpt"
 
+    energy_run_timeout: int = 3600
+
 def save_config(config: GA_cfg, path: str | Path):
     with open(path, "w") as f:
         f.write(asdict(config), encoding="utf-8")

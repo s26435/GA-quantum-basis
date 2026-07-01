@@ -234,11 +234,11 @@ class GA:
             mask_lambda=0.0,
             cmocorr_enabled=False,
             cmocorr_ref_orb=None,
-            cmocorr_orbital_candidates=self.cfg.cmocorr_orbital_candidates,
             cmocorr_t1=self.cfg.cmocorr_t1,
             cmocorr_t2=self.cfg.cmocorr_t2,
             cmocorr_lambda=0.0,
             cmocorr_fail_penalty=self.cfg.cmocorr_fail_penalty,
+            time_out=self.cfg.energy_run_timeout
         )
 
         if result.valid != 1 or not math.isfinite(result.energy):
@@ -481,6 +481,7 @@ class GA:
                             self.cfg.cmocorr_t2,
                             self.cfg.cmocorr_lambda,
                             self.cfg.cmocorr_fail_penalty,
+                            self.cfg.energy_run_timeout
                         )
                         futures[fut] = (
                             cache_key,
