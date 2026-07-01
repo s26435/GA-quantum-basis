@@ -2,7 +2,7 @@ import warnings
 
 from src.config import GA_cfg, save_config, load_config
 from src.ga import GA
-from src.util import lg
+from src.util import lg, compare_starting_seed_with_best_population
 import torch
 
 
@@ -455,4 +455,5 @@ if __name__ == "__main__":
 
     save_config(cfg, "config.json")
 
+    compare_starting_seed_with_best_population(seed, "populations.csv", [1]*len(seed), "analyze/compare.png", use_fit_wmask=False)
 
