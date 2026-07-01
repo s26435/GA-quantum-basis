@@ -1,7 +1,9 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import Optional, Tuple
 from .globals import BLOCKS, DEFAULT_WORK_ROOT, DEFAULT_REFERENCE_DIR
 
+from pathlib import Path
+import json
 
 @dataclass(frozen=True)
 class GA_cfg:
@@ -78,3 +80,12 @@ class GA_cfg:
     model_from_file: bool = False
     model_load_path: str = "model_be.ckpt"  #  ca = "model_ca.ckpt"
     model_save_path: str = "model_be.ckpt"
+
+def save_config(config: GA_cfg, path: str | Path):
+    with open(path, "w") as f:
+        f.write(asdict(config), encoding="utf-8")
+
+def load_config(path: str | Path) -> GA_cfg:
+    with open(path, "r") as f:
+        data = json.load(f)
+    return GA_cfg(**data)

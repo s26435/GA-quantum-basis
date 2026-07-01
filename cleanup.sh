@@ -5,3 +5,4 @@ rm -fr gen_[0-9][0-9][0-9][0-9]
 rm -r analyze/
 rm -r cache/
 rm -r workspace
+rm config.json

@@ -1,9 +1,10 @@
 import warnings
 
-from src.config import GA_cfg
+from src.config import GA_cfg, save_config, load_config
 from src.ga import GA
 from src.util import lg
 import torch
+
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
@@ -451,3 +452,7 @@ if __name__ == "__main__":
     lg("BEST_energy:" + str(best_energy), 1)
     lg("BEST_ALPHA:" + str(torch.exp(best_genome).tolist()), 1)
     lg("MASK: " + str(best_mask.tolist()), 1)
+
+    save_config(cfg, "config.json")
+
+
