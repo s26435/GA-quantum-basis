@@ -372,7 +372,7 @@ class GA:
             energy = float(hit["energy"])
             valid = int(hit["valid"])
 
-            if valid == 1 and math.isfinite(total_loss):
+            if math.isfinite(total_loss):
                 losses[i] = total_loss
                 raw_energies[i] = energy
             else:
