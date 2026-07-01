@@ -60,7 +60,7 @@ class GA_cfg:
     cmocorr_reference_dir: str = str(
         DEFAULT_REFERENCE_DIR
     )  # "/home/tezriem/Documents/GA-quantum-basis/workspace/reference"
-
+    include_orginal_seed: bool = False
     # TODO zmienić bo brzydkie af
     cmocorr_orbital_candidates: Tuple[str, ...] = ("RASORB",)
     cmocorr_t1: float = 0.90

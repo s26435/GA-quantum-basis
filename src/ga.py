@@ -674,7 +674,7 @@ class GA:
 
         lg("Initializing population...", self.cfg.log_level)
         pop, pop_mask = make_initial_population_from_seed(
-            seed_alphas, self.cfg.population_size, device=self.device
+            seed_alphas, self.cfg.population_size, device=self.device, include_orginal=self.cfg.include_orginal_seed
         )
 
         lg("Initializing policy model...", self.cfg.log_level)

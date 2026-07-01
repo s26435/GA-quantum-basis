@@ -80,7 +80,7 @@ def random_variation_ordered(seq: List[float]) -> List[float]:
 
 
 def make_initial_population_from_seed(
-    seed_alphas: List[float], pop_size: int, device: Union[str, torch.device] = "cpu"
+    seed_alphas: List[float], pop_size: int, device: Union[str, torch.device] = "cpu", include_orginal: bool = False
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Creates initial population for GA
@@ -97,9 +97,13 @@ def make_initial_population_from_seed(
     assert len(seed_alphas) == sum(BLOCKS), f"{len(seed_alphas)} is not {sum(BLOCKS)}"
 
     pop = []
-    pop.append(seed_alphas)
+    diff = 0
+    if include_orginal:
+        diff = 1
+        pop.append(seed_alphas)
+
     off = 0
-    for _ in range(pop_size - 1):
+    for _ in range(pop_size - diff):
         indiv = []
         off = 0
         for b in BLOCKS:

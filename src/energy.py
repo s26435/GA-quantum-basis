@@ -224,6 +224,11 @@ def run_energy_case(
             shutil.copy2(orb, target)
             orb = target.resolve()
 
+        text = orb.read_text(encoding="utf-8")
+        idx = 10
+        text = text[:idx] + "1" + text[idx + 1:]
+        orb.write_text(text, encoding="utf-8")
+
         orbital_file = str(orb) if orb else None
 
         if cmocorr_enabled:
