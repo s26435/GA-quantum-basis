@@ -199,7 +199,7 @@ def run_energy_case(
 
             with run_out.open("a", encoding="utf-8") as f:
                 f.write("\n[molcas TIMEOUT]\n")
-                f.write("Killed after 3600 seconds\n")
+                f.write(f"Killed after {time_out} seconds\n")
                 f.write(f"[molcas_workdir] {molcas_workdir}\n")
 
             return CaseResult(
@@ -278,14 +278,19 @@ def run_energy_case(
         ]
 
         orb = None
+        orbital_file = None
+
         for p in orb_candidates:
             if p.exists() and p.is_file():
                 orb = p.resolve()
                 break
+
         if orb is not None and orb.parent != wd:
             target = wd / orb.name
             shutil.copy2(orb, target)
             orb = target.resolve()
+
+        orbital_file = str(orb) if orb is not None else None
 
         if cmocorr_enabled:
             if not cmocorr_ref_orb:
