@@ -696,7 +696,7 @@ class GA:
         handle.touch(exist_ok=True)
         with open(handle, "a") as f:
             f.write(
-                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_len,best_energy,error,current_lambda\n"
+                "generation,generator_loss,gen_non_penalty_rate,ga_non_penalty_rate,best_fit,mean_fit,average_length,best_len,best_energy,error,current_lambda,current_sigma\n"
             )
 
         for gen in range(self.cfg.generations):
@@ -842,7 +842,7 @@ class GA:
 
             with open(handle, "a") as f:
                 f.write(
-                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_mask.sum().item():.3},{best_energy},{abs(err)},{curr_lambda:.2e}\n"
+                    f"{gen},{loss},{(gen_energy < (1e4 * 0.999)).float().mean().item():.3},{(fit < (1e4 * 0.999)).float().mean().item():.3},{best_fit},{fit.mean().item():.3},{pop_mask.sum(dim=1).mean().item():.3},{best_mask.sum().item():.3},{best_energy},{abs(err)},{curr_lambda:.2e}, {self.current_sigma}\n"
                 )
 
             self.opt.zero_grad()
