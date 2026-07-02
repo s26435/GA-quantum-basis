@@ -8,7 +8,12 @@ from pathlib import Path
 
 import csv
 
-from src.util import lg, make_initial_population_from_seed, sanitize_blocks, clear_molcas_work
+from src.util import (
+    lg,
+    make_initial_population_from_seed,
+    sanitize_blocks,
+    clear_molcas_work,
+)
 from src.globals import population_handle, BLOCKS
 from src.cache import CaseResult, CacheDatabase, hash_case_context
 from src.config import GA_cfg
@@ -130,7 +135,9 @@ class GA:
                 self._cmocorr_refs_by_sig[sig] = str(p.resolve())
 
     def _update_mutation_sigma(self, generation):
-        self.current_sigma = self.cfg.mutation_sigma * (1 - (math.log(1+generation))/(math.log(1+self.cfg.generations)))
+        self.current_sigma = self.cfg.mutation_sigma * (
+            1 - (math.log(1 + generation)) / (math.log(1 + self.cfg.generations))
+        )
 
     def _register_reference_for_signature(
         self,
@@ -238,7 +245,7 @@ class GA:
             cmocorr_t2=self.cfg.cmocorr_t2,
             cmocorr_lambda=0.0,
             cmocorr_fail_penalty=self.cfg.cmocorr_fail_penalty,
-            time_out=self.cfg.energy_run_timeout
+            time_out=self.cfg.energy_run_timeout,
         )
 
         if result.valid != 1 or not math.isfinite(result.energy):
@@ -463,6 +470,7 @@ class GA:
                         cmocorr_enabled_i,
                         cache_key,
                     ) in miss_ok:
+                        lg(f"Calculating fitness for {idx}...")
                         fut = ex.submit(
                             run_energy_case,
                             idx,
@@ -480,7 +488,7 @@ class GA:
                             self.cfg.cmocorr_t2,
                             self.cfg.cmocorr_lambda,
                             self.cfg.cmocorr_fail_penalty,
-                            self.cfg.energy_run_timeout
+                            self.cfg.energy_run_timeout,
                         )
                         futures[fut] = (
                             cache_key,
@@ -518,9 +526,7 @@ class GA:
                         self.energy_cache.load(cache_key, result)
                         if (
                             self.cfg.cmocorr_enabled
-                            and (
-                                not cmocorr_enabled_i
-                            )
+                            and (not cmocorr_enabled_i)
                             and result.valid == 1
                             and math.isfinite(float(result.energy))
                             and result.orbital_file is not None
@@ -674,7 +680,10 @@ class GA:
 
         lg("Initializing population...", self.cfg.log_level)
         pop, pop_mask = make_initial_population_from_seed(
-            seed_alphas, self.cfg.population_size, device=self.device, include_orginal=self.cfg.include_orginal_seed
+            seed_alphas,
+            self.cfg.population_size,
+            device=self.device,
+            include_orginal=self.cfg.include_orginal_seed,
         )
 
         lg("Initializing policy model...", self.cfg.log_level)
@@ -853,7 +862,6 @@ class GA:
 
             pop = torch.cat([next_base, gen_part], dim=0)
             pop_mask = torch.cat([next_base_mask, mask], dim=0)
-             
 
             self._update_mutation_sigma(gen)
             if err < best_err_seen - 1e-8:
@@ -863,21 +871,26 @@ class GA:
                 patience_counter += 1
 
             if patience_counter >= self.cfg.early_stopping_patience:
-                lg(f"Calculation stopped becouse patiente was hit: {self.cfg.early_stopping_patience}", self.cfg.log_level)
+                lg(
+                    f"Calculation stopped becouse patiente was hit: {self.cfg.early_stopping_patience}",
+                    self.cfg.log_level,
+                )
                 break
 
             if (self.cfg.ground_truth is not None) and (
                 abs(err) <= self.cfg.error_threshold_early_stopping
             ):
-                lg(f"Calculation stopped becouse error {abs(err)} < {self.cfg.error_threshold_early_stopping}", self.cfg.log_level)
+                lg(
+                    f"Calculation stopped becouse error {abs(err)} < {self.cfg.error_threshold_early_stopping}",
+                    self.cfg.log_level,
+                )
                 break
-            
-            total, used, free = shutil.disk_usage("/")
-            
+
+            _, _, free = shutil.disk_usage("/")
+
             clear_molcas_work(gen)
             if free <= 150 * 1024**3:
                 raise RuntimeError("No empty space left on device")
-
 
         torch.save(
             {

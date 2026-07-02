@@ -445,7 +445,7 @@ if __name__ == "__main__":
     #    4.60842311,
     #    1.02321986, # 6
     # ]
-    print(len(seed))
+    
     ga = GA(cfg)
     best_genome, best_mask, best_fit, best_energy = ga.run(seed)
     lg("BEST_FIT:" + str(best_fit), 1)
