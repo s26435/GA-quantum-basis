@@ -19,6 +19,7 @@ from src.cache import CaseResult, CacheDatabase, hash_case_context
 from src.config import GA_cfg
 from src.model import PopGenerator, GaussianPolicy
 from src.energy import run_energy_case
+from src.parse_energy import main_with_return
 
 import torch
 
@@ -357,22 +358,22 @@ class GA:
             ]
         ] = []
 
+        penalty = 1e4
+
         for i, key in enumerate(keys):
             hit = self.energy_cache.check(key)
 
-            if hit is None:
-                miss.append(
-                    (
-                        i,
-                        alphas_all[i],
-                        mask_all[i],
-                        mask_lens[i],
-                        signatures[i],
-                        ref_paths[i],
-                        cmocorr_enabled_flags[i],
-                        key,
-                    )
-                )
+            if hit is not None:
+                valid = int(hit["valid"])
+                if valid == 1 and math.isfinite(float(hit["energy"])):
+                    energy = float(hit["energy"])
+                    orbital_penalty = float(hit["orbital_penalty"])
+                    losses[i] = energy + mask_lambda * mask_lens[i] + self.cfg.cmocorr_lambda * orbital_penalty
+                    raw_energies[i] = energy
+                    continue
+
+                losses[i] = penalty
+                raw_energies[i] = float("nan")
                 continue
 
             total_loss = float(hit["total_loss"])
@@ -396,7 +397,7 @@ class GA:
                     )
                 )
 
-        penalty = 1e4
+
 
         if miss:
             python_bin = self.cfg.python_bin
@@ -699,6 +700,9 @@ class GA:
         curr_lambda = self.cfg.start_lambda
         self._current_lambda = curr_lambda
         self._resolve_cmocorr_reference(seed_alphas)
+
+        if self.cfg.ground_truth is None:
+            self.cfg.ground_truth = main_with_return(Path(f"{self.cfg.work_root}/reference/reference_case_0000/run.out"))
 
         lg("Starting GA...", self.cfg.log_level)
         handle = Path("metrics.csv")

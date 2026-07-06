@@ -100,15 +100,6 @@ def run_cmocorr(
     assert (cmowd / "CMOCHK").exists(), f"Missing {cmowd / 'CMOCHK'}"
 
     with log.open("w", encoding="utf-8") as f:
-        proc = subprocess.run(
-            [molcas_cmd, "cmocorr.input"],
-            cwd=str(cmowd),
-            env=env,
-            stdout=f,
-            stderr=subprocess.STDOUT,
-        )
-
-    with log.open("w", encoding="utf-8") as f:
         f.write(f"[DEBUG] cwd={cmowd}\n")
         f.write(f"[DEBUG] CMOREF exists={(cmowd / 'CMOREF').exists()}\n")
         f.write(f"[DEBUG] CMOCHK exists={(cmowd / 'CMOCHK').exists()}\n")
