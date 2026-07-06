@@ -358,22 +358,22 @@ class GA:
             ]
         ] = []
 
-        penalty = 1e4
-
         for i, key in enumerate(keys):
             hit = self.energy_cache.check(key)
 
-            if hit is not None:
-                valid = int(hit["valid"])
-                if valid == 1 and math.isfinite(float(hit["energy"])):
-                    energy = float(hit["energy"])
-                    orbital_penalty = float(hit["orbital_penalty"])
-                    losses[i] = energy + mask_lambda * mask_lens[i] + self.cfg.cmocorr_lambda * orbital_penalty
-                    raw_energies[i] = energy
-                    continue
-
-                losses[i] = penalty
-                raw_energies[i] = float("nan")
+            if hit is None:
+                miss.append(
+                    (
+                        i,
+                        alphas_all[i],
+                        mask_all[i],
+                        mask_lens[i],
+                        signatures[i],
+                        ref_paths[i],
+                        cmocorr_enabled_flags[i],
+                        key,
+                    )
+                )
                 continue
 
             total_loss = float(hit["total_loss"])
@@ -397,7 +397,7 @@ class GA:
                     )
                 )
 
-
+        penalty = 1e4
 
         if miss:
             python_bin = self.cfg.python_bin
