@@ -83,9 +83,9 @@ class GA_cfg:
 
     energy_run_timeout: int = 3600
 
-def save_config(config: GA_cfg, path: str | Path):
-    with open(path, "w") as f:
-        f.write(asdict(config))
+def save_config(config, path: str):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(asdict(config), f, indent=4)
 
 def load_config(path: str | Path) -> GA_cfg:
     with open(path, "r") as f:
