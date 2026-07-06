@@ -584,8 +584,10 @@ class GA:
         return torch.tensor(out, dtype=torch.float32, device=population.device)
 
     def lambda_from_error(
-        self, err_abs, lam_min=1e-7, lam_max=5e-3, e_low=0.003, e_high=0.05
-    ):
+        self, err_abs, e_low=0.003, e_high=0.05
+    ):  
+        lam_max = self.cfg.start_lambda
+        lam_min = self.cfg.end_lambda
         x = (err_abs - e_low) / (e_high - e_low)
         x = max(0.0, min(1.0, x))
         return lam_min + (lam_max - lam_min) * x
