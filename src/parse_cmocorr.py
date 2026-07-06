@@ -50,6 +50,14 @@ def parse_cmocorr_text(text: str, t1: float) -> dict:
 
     min_overlap = min(overlaps) if overlaps else None
 
+    if min_overlap is None:
+        return {
+            "ok": False,
+            "warning_count": warning_count,
+            "min_overlap": None,
+            "penalty": 1e4,
+        }
+
     penalty = 0.0
     penalty += 0.25 * warning_count
 

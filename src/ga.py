@@ -46,6 +46,9 @@ class GA:
         self.baseline = None
         self.baseline_beta = 0.9
 
+        self._last_sanitized_population: Optional[torch.Tensor] = None
+        self._last_sanitized_masks: Optional[torch.Tensor] = None
+
         self.energy_cache = CacheDatabase(config.db_path)
         self.n_elite = max(1, int(self.cfg.elite_frac * self.cfg.population_size))
         self.n_gen = max(
@@ -564,6 +567,20 @@ class GA:
             out_energy, dtype=torch.float32, device=population.device
         )
 
+        self._last_sanitized_population = torch.log(
+            torch.tensor(
+                alphas_all,
+                dtype=torch.float32,
+                device=population.device,
+            ).clamp_min(1e-30)
+        )
+
+        self._last_sanitized_masks = torch.tensor(
+            mask_all,
+            dtype=torch.float32,
+            device=population.device,
+        )
+
         return torch.tensor(out, dtype=torch.float32, device=population.device)
 
     def lambda_from_error(
@@ -658,7 +675,7 @@ class GA:
         B, _ = x.shape
         if self.cfg.mutation_p > 0:
             do_mut = (torch.rand(B, 1, device=x.device) < self.cfg.mutation_p).float()
-            noise = torch.randn_like(x) * self.cfg.mutation_sigma
+            noise = torch.randn_like(x) * self.current_sigma
             x = x + do_mut * noise
         m = (m > 0.5).float()
         if self.cfg.mask_flip_p > 0:
@@ -697,12 +714,16 @@ class GA:
         best_err_seen = float("inf")
         patience_counter = 0
 
+        best_targ = (None, None)
+
         curr_lambda = self.cfg.start_lambda
         self._current_lambda = curr_lambda
         self._resolve_cmocorr_reference(seed_alphas)
 
         if self.cfg.ground_truth is None:
-            self.cfg.ground_truth = main_with_return(Path(f"{self.cfg.work_root}/reference/reference_case_0000/run.out"))
+            self.cfg.ground_truth = main_with_return(
+                Path(f"{self.cfg.work_root}/reference/reference_case_0000/run.out")
+            )
 
         lg("Starting GA...", self.cfg.log_level)
         handle = Path("metrics.csv")
@@ -721,6 +742,8 @@ class GA:
             fit = self.fitness(pop, pop_mask, "pop")
             lg("Fitness calculated...", self.cfg.log_level)
             raw_energy_pop = self._last_raw_energies.clone()
+            sanitized_pop = self._last_sanitized_population.clone()
+            sanitized_mask = self._last_sanitized_masks.clone()
             fit_wmask = fit
 
             lg(
@@ -730,8 +753,8 @@ class GA:
             with open(population_handle, "a") as file:
                 w = csv.writer(file)
                 for p, msk, f, fwm in zip(
-                    pop.detach().cpu().tolist(),
-                    pop_mask.detach().cpu().tolist(),
+                    sanitized_pop.detach().cpu().tolist(),
+                    sanitized_mask.detach().cpu().tolist(),
                     fit.detach().cpu().tolist(),
                     fit_wmask.detach().cpu().tolist(),
                 ):
@@ -753,8 +776,9 @@ class GA:
             if minfit < best_fit:
                 best_fit = float(minfit)
                 best_energy = min_energy
-                best_genome = pop[argmin].detach().clone()
-                best_mask = pop_mask[argmin].detach().clone()
+                best_genome = sanitized_pop[argmin].detach().clone()
+                best_mask = sanitized_mask[argmin].detach().clone()
+                best_targ = (gen, argmin)
 
             elite_idx = torch.argsort(fit_wmask)[: self.n_elite]
 
@@ -874,6 +898,8 @@ class GA:
             else:
                 patience_counter += 1
 
+            lg(f"Patience: {patience_counter}/{self.cfg.early_stopping_patience}", self.cfg.log_level)
+
             if patience_counter >= self.cfg.early_stopping_patience:
                 lg(
                     f"Calculation stopped becouse patiente was hit: {self.cfg.early_stopping_patience}",
@@ -905,4 +931,9 @@ class GA:
             },
             self.cfg.model_save_path,
         )
-        return best_genome, best_mask, best_fit, best_energy
+
+        out_path = Path(
+            f"{self.cfg.work_root}/gen_{best_targ[0]:04d}/pop_case_{best_targ[1]:04d}"
+        )
+
+        return best_genome, best_mask, best_fit, best_energy, out_path

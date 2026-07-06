@@ -447,11 +447,12 @@ if __name__ == "__main__":
     # ]
     
     ga = GA(cfg)
-    best_genome, best_mask, best_fit, best_energy = ga.run(seed)
+    best_genome, best_mask, best_fit, best_energy, best_input = ga.run(seed)
     lg("BEST_FIT:" + str(best_fit), 1)
     lg("BEST_energy:" + str(best_energy), 1)
     lg("BEST_ALPHA:" + str(torch.exp(best_genome).tolist()), 1)
     lg("MASK: " + str(best_mask.tolist()), 1)
+    lg("Best path" + str(best_input), 1)
 
     save_config(cfg, "config.json")
 
