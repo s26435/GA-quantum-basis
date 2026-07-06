@@ -21,6 +21,8 @@ class GA_cfg:
     # mask weight multiplier
     start_lambda: float = 5e-4 
     end_lambda: float = 5e-5
+    error_start: float = 
+    error_end:float = 
 
     # ga auto stops when error is lower
     error_threshold_early_stopping: float = 1e-6 

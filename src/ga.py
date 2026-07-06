@@ -583,14 +583,17 @@ class GA:
 
         return torch.tensor(out, dtype=torch.float32, device=population.device)
 
-    def lambda_from_error(
-        self, err_abs, e_low=0.003, e_high=0.05
-    ):  
-        lam_max = self.cfg.start_lambda
-        lam_min = self.cfg.end_lambda
-        x = (err_abs - e_low) / (e_high - e_low)
-        x = max(0.0, min(1.0, x))
-        return lam_min + (lam_max - lam_min) * x
+    def lambda_from_error(self, err_abs):
+        return self.cfg.end_lambda + (
+            self.cfg.start_lambda - self.cfg.end_lambda
+        ) * max(
+            0.0,
+            min(
+                1.0,
+                (err_abs - self.cfg.error_end)
+                / (self.cfg.error_start - self.cfg.error_end),
+            ),
+        )
 
     def _tournament_select(self, fit: torch.Tensor, n_select: int) -> torch.Tensor:
         """
@@ -900,7 +903,10 @@ class GA:
             else:
                 patience_counter += 1
 
-            lg(f"Patience: {patience_counter}/{self.cfg.early_stopping_patience}", self.cfg.log_level)
+            lg(
+                f"Patience: {patience_counter}/{self.cfg.early_stopping_patience}",
+                self.cfg.log_level,
+            )
 
             if patience_counter >= self.cfg.early_stopping_patience:
                 lg(
