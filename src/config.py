@@ -9,6 +9,7 @@ import json
 class GA_cfg:
     # true value of energy - used in early stopping, may be None
     ground_truth: Optional[float] = None
+    error_ground_truth: Optional[float] = None
     # GA
     population_size: int = 30
     device: str = "cpu"

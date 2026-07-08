@@ -552,9 +552,13 @@ class GA:
                                     f"Failed to register CMOCORR reference for signature={sig_i}: {e!r}",
                                     self.cfg.log_level,
                                 )
+        
+        def is_below(gt) -> bool:
+            return gt <= self.cfg.error_ground_truth
+
 
         out = [
-            penalty if (v is None or not math.isfinite(float(v))) else float(v)
+            penalty if (v is None or not math.isfinite(float(v)) or is_below(v)) else float(v)
             for v in losses
         ]
 
@@ -729,7 +733,13 @@ class GA:
             self.cfg.ground_truth = main_with_return(
                 Path(f"{self.cfg.work_root}/reference/reference_case_0000/run.out")
             )
-            lg(f"Ground truth:{self.cfg.ground_truth}")
+            lg(f"Ground truth:{self.cfg.ground_truth}", self.cfg.log_level)
+
+        if self.cfg.error_ground_truth is None:
+            self.cfg.error_ground_truth = (
+                self.cfg.ground_truth + self.cfg.ground_truth * 0.1
+            )
+            lg(f"Error ground truth:{self.cfg.error_ground_truth}", self.cfg.log_level)
 
         lg("Starting GA...", self.cfg.log_level)
         handle = Path("metrics.csv")
