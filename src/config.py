@@ -5,50 +5,50 @@ from .globals import BLOCKS, DEFAULT_WORK_ROOT, DEFAULT_REFERENCE_DIR
 from pathlib import Path
 import json
 
-@dataclass(frozen=True)
+@dataclass()
 class GA_cfg:
     # true value of energy - used in early stopping, may be None
-    ground_truth: Optional[float] = -290.781 # -26448.51 # -2428.25 # 289.781 Si #Ru -4528.2681 # Th -26448.51 #Cs -7783.78375
+    ground_truth: Optional[float] = None
     # GA
     population_size: int = 30
     device: str = "cpu"
-    generations: int = 100
+    generations: int = 1000
     genome_size: int = sum(BLOCKS)
 
     # when mask will be smaller then that algorithm will give it penalty
-    min_mask_size: int = 20
+    min_mask_size: int = 19
 
     # mask weight multiplier
-    start_lambda: float = 5e-4 
-    end_lambda: float = 5e-5
-    error_start: float = 
-    error_end:float = 
+    start_lambda: float = 5e-2 
+    end_lambda: float = 5e-3
+    error_start: float = 5e-1 
+    error_end:float = 3e-4
 
     # ga auto stops when error is lower
     error_threshold_early_stopping: float = 1e-6 
-    early_stopping_patience: int = 30
+    early_stopping_patience: int = 500
 
     # GA FUNCTIONS
     elite_frac: float = 0.2
-    tournament_k: int = 2
+    tournament_k: int = 3
     crossover_p: float = 0.9
     # exponent mutation probability
-    mutation_p: float = 0.4
+    mutation_p: float = 0.6
     # strenght of mutation
-    mutation_sigma: float = 3
+    mutation_sigma: float = 10
     # mask mutation probability
-    mask_flip_p: float = 0 #.01
+    mask_flip_p: float = 0.01
 
     # GENERATOR PARAMETERS
     # latent space size
     zdim: int = 16
     # % generated genomes in population
-    gen_percent: float = 0.5
+    gen_percent: float = 0.3
 
     # generator training
     lr: float = 1e-3
     weight_decay: float = 1e-4
-    local_max_workers: int = 30
+    local_max_workers: int = 15
 
     # directories
     work_root: str = str(
@@ -66,11 +66,10 @@ class GA_cfg:
         DEFAULT_REFERENCE_DIR
     )  # "/home/tezriem/Documents/GA-quantum-basis/workspace/reference"
     include_orginal_seed: bool = False
-    # TODO zmienić bo brzydkie af
-    cmocorr_orbital_candidates: Tuple[str, ...] = ("RASORB",)
+    
     cmocorr_t1: float = 0.90
     cmocorr_t2: float = 0.95
-    cmocorr_lambda: float = 1e-3
+    cmocorr_lambda: float = 1e-6
     cmocorr_fail_penalty: float = 1e4
 
     # logging
@@ -84,7 +83,7 @@ class GA_cfg:
     model_load_path: str = "model_be.ckpt"  #  ca = "model_ca.ckpt"
     model_save_path: str = "model_be.ckpt"
 
-    energy_run_timeout: int = 3600
+    energy_run_timeout: int = 60*5
 
 def save_config(config, path: str):
     with open(path, "w", encoding="utf-8") as f:

@@ -729,6 +729,7 @@ class GA:
             self.cfg.ground_truth = main_with_return(
                 Path(f"{self.cfg.work_root}/reference/reference_case_0000/run.out")
             )
+            lg(f"Ground truth:{self.cfg.ground_truth}")
 
         lg("Starting GA...", self.cfg.log_level)
         handle = Path("metrics.csv")

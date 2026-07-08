@@ -1,14 +1,11 @@
- &SEWARD  &END
+&SEWARD  &END
 Expert
 Title
  Si atom
 Symmetry
- xyz
-* Exact 2C Hamiltonian
+ XYZ
 RX2C
-* Finite Gaussian Nucleus
 Finite
-*----------------------------------------------------------------
 Basis set
 Si.... / inline  
 14.00 5
@@ -74,37 +71,42 @@ NEW6
 0. 0. 1.
 Si     0.00000   0.00000   0.00000
 End of basis
-*----------------------------------------------------------------
 End of input
+&GUESSORB
 
- &GUESSORB &END
-sThr
- 0.0d0
-tThr
- 1.0d12
-End of Input
-
- &RASSCF &END
-atom
-Symmetry
-  1
+&RASSCF &END
+Title
+ Si 0  3s23p2  3P  ag  (3 roots)
+FILEORB = $WorkDir/$Project.GssOrb
 Spin
-  3
+ 3
+Symmetry
+ 1
+nActEl
+ 2 0 0
 Inactive
-  2  3
+ 3 3
 Ras2
-  1  3
-Nactel
-  4  0  0 
-CiRoot
-  3  3  1
+ 0 3
+Levshft
+ 0.5
+ITERation
+ 200 100
+CIROOT
+ 3 3 1
 End of input
 
- &CASPT2 &END
-XMultistate 
-all
+&CASPT2 &END
+Title
+ Si 0 3s23p2 3P   root 1   (set 1)
+XMULTistate
+ 1 1
 MaxIter
-200
+ 200
 IPEA = 0
+IMAGinary
+ 0.1
+PROPerties
+DENSity
 
 

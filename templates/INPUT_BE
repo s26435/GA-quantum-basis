@@ -39,19 +39,43 @@ NEW4
  0 1 
 Be 0 0 0  
 end of basis
- &seward
+&SEWARD
+&GUESSORB
 
- &rasscf
- inactive
- 0
- ras2
- 9
- charge
- 0
- nactel
- 4 0 0
- spin
+&RASSCF &END
+Title
+ Be 0  2s2  1S  ag block  (1 roots)
+Spin
  1
- &caspt2
+Symmetry
+ 1
+nActEl
+ 2 0 0
+Inactive
+ 1 0       
+Ras2
+ 1 0         
+Levshft
+ 0.5
+ITERation
+ 200 100
+CIROOT
+ 1 1 1
+End of input
 
- 
+&CASPT2 &END
+Title
+ Be 0 1S   root 1   (set 1)
+XMULTistate
+ 1 1
+Frozen
+ 0 0
+MaxIter
+ 200
+IPEA = 0
+IMAGinary
+ 0.1
+PROPerties
+DENSity
+End of input
+
