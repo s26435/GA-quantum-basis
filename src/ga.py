@@ -721,6 +721,7 @@ class GA:
         best_fit = float("inf")
 
         best_err_seen = float("inf")
+        best_mask_len_seen = float("inf")
         patience_counter = 0
 
         best_targ = (None, None)
@@ -908,8 +909,9 @@ class GA:
             pop_mask = torch.cat([next_base_mask, mask], dim=0)
 
             self._update_mutation_sigma(gen)
-            if err < best_err_seen - 1e-8:
+            if err < best_err_seen - 1e-8 and sum(best_mask) < best_mask_len_seen:
                 best_err_seen = err
+                best_mask_len_seen = sum(best_mask)
                 patience_counter = 0
             else:
                 patience_counter += 1
