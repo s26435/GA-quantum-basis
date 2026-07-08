@@ -105,6 +105,7 @@ class GaussianPolicy(nn.Module):
         :type zdim: int
         """
         super().__init__()
+        # TODO maybe better initialization of parameters
         self.mu = nn.Parameter(torch.zeros(pop_size, zdim))
         self.log_std = nn.Parameter(torch.zeros(pop_size, zdim))
 
